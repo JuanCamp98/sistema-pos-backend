@@ -1,0 +1,110 @@
+// Archivo de esquema de Prisma
+// Aca se definen las tablas de la base de datos y sus relaciones
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Roles disponibles para los usuarios del sistema
+model Rol {
+  id     String @id @default(uuid())
+  nombre String @unique
+
+  usuarios Usuario[]
+
+  @@map("roles")
+}
+
+// Usuarios que pueden iniciar sesion en el sistema
+model Usuario {
+  id            String   @id @default(uuid())
+  nombre        String
+  apellido      String
+  email         String   @unique
+  contrasena    String
+  rolId         String   @map("rol_id")
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  rol    Rol     @relation(fields: [rolId], references: [id])
+  ventas Venta[]
+
+  @@map("usuarios")
+}
+
+// Productos disponibles para la venta
+model Producto {
+  id            String   @id @default(uuid())
+  nombre        String
+  descripcion   String?
+  precio        Decimal  @db.Decimal(10, 2)
+  stock         Int      @default(0)
+  categoria     String
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  detallesVenta    DetalleVenta[]
+  movimientosStock MovimientoStock[]
+
+  @@map("productos")
+}
+
+// Registro de cada venta realizada
+model Venta {
+  id        String   @id @default(uuid())
+  fecha     DateTime @default(now())
+  total     Decimal  @db.Decimal(10, 2)
+  usuarioId String   @map("usuario_id")
+
+  usuario  Usuario        @relation(fields: [usuarioId], references: [id])
+  detalles DetalleVenta[]
+
+  @@map("ventas")
+}
+
+// Cada producto vendido dentro de una venta
+model DetalleVenta {
+  id             String  @id @default(uuid())
+  ventaId        String  @map("venta_id")
+  productoId     String  @map("producto_id")
+  cantidad       Int
+  precioUnitario Decimal @map("precio_unitario") @db.Decimal(10, 2)
+  subtotal       Decimal @db.Decimal(10, 2)
+
+  venta    Venta    @relation(fields: [ventaId], references: [id])
+  producto Producto @relation(fields: [productoId], references: [id])
+
+  @@map("detalles_venta")
+}
+
+// Tipo de movimiento de stock: entrada o salida
+enum TipoMovimientoStock {
+  ENTRADA
+  SALIDA
+}
+
+// Motivo por el cual se genero el movimiento de stock
+enum MotivoMovimientoStock {
+  VENTA
+  AJUSTE_MANUAL
+  DEVOLUCION
+}
+
+// Historial de cada cambio de stock de un producto
+model MovimientoStock {
+  id           String                @id @default(uuid())
+  productoId   String                @map("producto_id")
+  tipo         TipoMovimientoStock
+  motivo       MotivoMovimientoStock
+  cantidad     Int
+  referenciaId String?               @map("referencia_id")
+  creadoEn     DateTime              @default(now()) @map("creado_en")
+
+  producto Producto @relation(fields: [productoId], references: [id])
+
+  @@map("movimientos_stock")
+}
