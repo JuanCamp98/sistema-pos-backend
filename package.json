@@ -1,7 +1,7 @@
 {
   "name": "sistema-pos-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Backend del sistema POS Web encargado de gestionar la lógica de negocio, autenticación de usuarios, control de inventario, ventas, caja y generación de reportes.",
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",
@@ -20,11 +20,17 @@
   },
   "homepage": "https://github.com/JuanCamp98/sistema-pos-backend#readme",
   "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.0",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "prisma": "^7.9.0"
   }
 }
