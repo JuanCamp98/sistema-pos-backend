@@ -1,11 +1,10 @@
-const express = require("express");
+// Punto de entrada del servidor
+require("dotenv/config");
 
-const app = express();
+const app = require("./src/app");
 
-app.get("/", (req, res) => {
-    res.send("POS Backend funcionando");
-});
+const PUERTO = process.env.PORT || 3000;
 
-app.listen(3000, () => {
-    console.log("Servidor corriendo en puerto 3000");
+app.listen(PUERTO, () => {
+    console.log("Servidor corriendo en el puerto " + PUERTO);
 });
