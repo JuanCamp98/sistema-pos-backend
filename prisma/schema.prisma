@@ -44,6 +44,7 @@ model Producto {
   precio        Decimal  @db.Decimal(10, 2)
   stock         Int      @default(0)
   categoria     String
+  activo        Boolean  @default(true)
   creadoEn      DateTime @default(now()) @map("creado_en")
   actualizadoEn DateTime @updatedAt @map("actualizado_en")
 
