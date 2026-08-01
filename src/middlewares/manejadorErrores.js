@@ -1,11 +1,8 @@
-// Middleware que captura errores y responde de forma consistente
-// Se coloca al final de todas las rutas en app.js
 function manejadorErrores(error, req, res, next) {
     console.log(error);
-
-    res.status(500).json({
-        mensaje: "Ocurrio un error en el servidor"
-    });
+    const codigoEstado = error.codigoEstado || 500;
+    const mensaje = error.codigoEstado ? error.message : "Ocurrio un error en el servidor";
+    res.status(codigoEstado).json({ mensaje: mensaje });
 }
 
 module.exports = manejadorErrores;

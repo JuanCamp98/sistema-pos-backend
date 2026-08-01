@@ -3,6 +3,8 @@ const express = require("express");
 const cors = require("cors");
 
 const usuarioRoutes = require("./routes/usuarioRoutes");
+const productoRoutes = require("./routes/productoRoutes");
+const movimientoStockRoutes = require("./routes/movimientoStockRoutes");
 const manejadorErrores = require("./middlewares/manejadorErrores");
 
 const app = express();
@@ -16,12 +18,10 @@ app.get("/", (req, res) => {
     res.send("Servidor del sistema POS funcionando");
 });
 
-
-const productoRoutes = require("./routes/productoRoutes");
-app.use("/productos", productoRoutes);
-
 // Rutas de la aplicacion
 app.use("/usuarios", usuarioRoutes);
+app.use("/productos", productoRoutes);
+app.use("/stock", movimientoStockRoutes);
 
 // Middleware de manejo de errores, siempre al final
 app.use(manejadorErrores);
