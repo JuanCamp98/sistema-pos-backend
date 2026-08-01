@@ -16,6 +16,10 @@ app.get("/", (req, res) => {
     res.send("Servidor del sistema POS funcionando");
 });
 
+
+const productoRoutes = require("./routes/productoRoutes");
+app.use("/productos", productoRoutes);
+
 // Rutas de la aplicacion
 app.use("/usuarios", usuarioRoutes);
 
