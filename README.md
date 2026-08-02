@@ -4,6 +4,12 @@
 
 Backend del sistema POS Web encargado de gestionar la lógica de negocio, autenticación de usuarios, control de inventario, ventas, caja y generación de reportes.
 
+## Documentación completa
+
+La documentación detallada del proyecto (modelo de datos, endpoints, decisiones técnicas) está en el siguiente Google Doc:
+
+[Documentación del proyecto](https://docs.google.com/document/d/1U9A7sZCXHqEEOIHKMWEZhd4TZFbID6rypjZ4SzBhiS0/edit?usp=sharing)
+
 ## Integrantes
 
 * Corti Pedro Pablo
@@ -16,6 +22,8 @@ Backend del sistema POS Web encargado de gestionar la lógica de negocio, autent
 * Express
 * PostgreSQL
 * Prisma ORM
+* JWT (autenticación)
+* bcryptjs (encriptación de contraseñas)
 
 ## Instalación
 
@@ -37,22 +45,30 @@ cd pos-web-backend
 npm install
 ```
 
-4. Ejecutar el servidor:
+4. Crear un archivo `.env` en la raíz del proyecto con las siguientes variables:
+PORT=3000 
+DATABASE_URL=tu_url_de_conexion_a_postgres 
+JWT_SECRET=una_clave_secreta_cualquiera
+
+5. Levantar la base de datos local (dejar la terminal abierta):
+
+```bash
+npx prisma dev
+```
+
+6. En otra terminal, ejecutar el servidor:
 
 ```bash
 npm run dev
 ```
 
-## Variables de Entorno
+## Módulos implementados (backend)
 
-Crear un archivo `.env` tomando como referencia el archivo `.env_example`.
-
-Variables requeridas:
-
-* PORT
-* DATABASE_URL
-* JWT_SECRET
+* **Usuarios**: registro y login con JWT
+* **Productos**: CRUD completo con borrado lógico
+* **Stock**: registro de movimientos (entradas/salidas) con historial
+* **Ventas**: registro de ventas con transacción atómica (descuenta stock automáticamente) e historial de ventas
 
 ## Estado Actual
 
-Proyecto inicializado con Express y preparado para comenzar el desarrollo de la API y la integración con la base de datos.
+Backend con los módulos principales implementados y probados. Pendiente: integración con el frontend.
