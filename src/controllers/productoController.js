@@ -12,8 +12,10 @@ async function crear(req, res, next) {
 
 async function listar(req, res, next) {
     try {
-        const productos = await productoService.listarProductos();
-        res.status(200).json({ productos: productos });
+        const pagina = parseInt(req.query.pagina);
+        const limite = parseInt(req.query.limite);
+        const resultado = await productoService.listarProductos(pagina, limite);
+        res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
 

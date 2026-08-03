@@ -38,12 +38,29 @@ async function registrarMovimiento(datos) {
     return resultado;
 }
 
-async function listarMovimientos() {
-    const movimientos = await prisma.movimientoStock.findMany({
-        include: { producto: true },
-        orderBy: { creadoEn: "desc" }
-    });
-    return movimientos;
+async function listarMovimientos(pagina, limite) {
+    const paginaActual = pagina || 1;
+    const limiteActual = limite || 10;
+    const saltar = (paginaActual - 1) * limiteActual;
+
+    const [movimientos, total] = await prisma.$transaction([
+        prisma.movimientoStock.findMany({
+            include: { producto: true },
+            orderBy: { creadoEn: "desc" },
+            skip: saltar,
+            take: limiteActual
+        }),
+        prisma.movimientoStock.count()
+    ]);
+
+    return {
+        movimientos: movimientos,
+        paginacion: {
+            paginaActual: paginaActual,
+            totalPaginas: Math.ceil(total / limiteActual),
+            totalRegistros: total
+        }
+    };
 }
 
 async function listarMovimientosPorProducto(productoId) {

@@ -14,8 +14,10 @@ async function registrar(req, res, next) {
 
 async function listar(req, res, next) {
     try {
-        const ventas = await ventaService.listarVentas();
-        res.status(200).json({ ventas: ventas });
+        const pagina = parseInt(req.query.pagina);
+        const limite = parseInt(req.query.limite);
+        const resultado = await ventaService.listarVentas(pagina, limite);
+        res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
 

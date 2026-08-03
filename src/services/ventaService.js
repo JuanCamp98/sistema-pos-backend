@@ -64,15 +64,32 @@ async function registrarVenta(usuarioId, items) {
     return resultado;
 }
 
-async function listarVentas() {
-    const ventas = await prisma.venta.findMany({
-        include: {
-            detalles: true,
-            usuario: { select: { id: true, nombre: true, apellido: true } }
-        },
-        orderBy: { fecha: "desc" }
-    });
-    return ventas;
+async function listarVentas(pagina, limite) {
+    const paginaActual = pagina || 1;
+    const limiteActual = limite || 10;
+    const saltar = (paginaActual - 1) * limiteActual;
+
+    const [ventas, total] = await prisma.$transaction([
+        prisma.venta.findMany({
+            include: {
+                detalles: true,
+                usuario: { select: { id: true, nombre: true, apellido: true } }
+            },
+            orderBy: { fecha: "desc" },
+            skip: saltar,
+            take: limiteActual
+        }),
+        prisma.venta.count()
+    ]);
+
+    return {
+        ventas: ventas,
+        paginacion: {
+            paginaActual: paginaActual,
+            totalPaginas: Math.ceil(total / limiteActual),
+            totalRegistros: total
+        }
+    };
 }
 
 async function obtenerVentaPorId(id) {

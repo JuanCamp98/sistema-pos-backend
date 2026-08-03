@@ -12,8 +12,10 @@ async function registrar(req, res, next) {
 
 async function listar(req, res, next) {
     try {
-        const movimientos = await movimientoStockService.listarMovimientos();
-        res.status(200).json({ movimientos: movimientos });
+        const pagina = parseInt(req.query.pagina);
+        const limite = parseInt(req.query.limite);
+        const resultado = await movimientoStockService.listarMovimientos(pagina, limite);
+        res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
 

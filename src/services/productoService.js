@@ -8,12 +8,29 @@ async function crearProducto(datos) {
     return nuevoProducto;
 }
 
-async function listarProductos() {
-    const productos = await prisma.producto.findMany({
-        where: { activo: true },
-        orderBy: { nombre: "asc" }
-    });
-    return productos;
+async function listarProductos(pagina, limite) {
+    const paginaActual = pagina || 1;
+    const limiteActual = limite || 10;
+    const saltar = (paginaActual - 1) * limiteActual;
+
+    const [productos, total] = await prisma.$transaction([
+        prisma.producto.findMany({
+            where: { activo: true },
+            orderBy: { nombre: "asc" },
+            skip: saltar,
+            take: limiteActual
+        }),
+        prisma.producto.count({ where: { activo: true } })
+    ]);
+
+    return {
+        productos: productos,
+        paginacion: {
+            paginaActual: paginaActual,
+            totalPaginas: Math.ceil(total / limiteActual),
+            totalRegistros: total
+        }
+    };
 }
 
 async function obtenerProductoPorId(id) {
