@@ -20,6 +20,12 @@ async function main() {
         create: { nombre: "Cajero" }
     });
 
+    await prisma.rol.upsert({
+    where: { nombre: "Cliente" },
+    update: {},
+    create: { nombre: "Cliente" }
+    });
+
     console.log("Roles cargados correctamente");
 }
 
