@@ -1,7 +1,18 @@
 const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
-async function registrarVenta(usuarioId, items) {
+function generarCodigoComprobante() {
+    const fecha = new Date();
+    const anio = fecha.getFullYear();
+    const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+    const dia = String(fecha.getDate()).padStart(2, "0");
+    const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `V-${anio}${mes}${dia}-${random}`;
+}
+
+async function registrarVenta(usuarioId, datos) {
+    const { items, cliente, metodoPago } = datos;
+
     if (!items || items.length === 0) {
         throw new ErrorPersonalizado("La venta debe tener al menos un producto", 400);
     }
@@ -18,8 +29,14 @@ async function registrarVenta(usuarioId, items) {
             if (item.cantidad <= 0) {
                 throw new ErrorPersonalizado("La cantidad debe ser mayor a cero", 400);
             }
-            if (producto.stock < item.cantidad) {
-                throw new ErrorPersonalizado("Stock insuficiente para: " + producto.nombre, 400);
+
+            const stockDisponible = producto.stock - producto.stockReservado;
+            if (stockDisponible < item.cantidad) {
+                throw new ErrorPersonalizado(
+                    "Stock insuficiente para: " + producto.nombre +
+                    " (disponible: " + stockDisponible + ")",
+                    400
+                );
             }
 
             const subtotal = Number(producto.precio) * item.cantidad;
@@ -35,12 +52,57 @@ async function registrarVenta(usuarioId, items) {
 
         const venta = await tx.venta.create({
             data: {
-                usuarioId: usuarioId,
+                usuarioId: usuarioId || null,
+                clienteNombre: cliente?.nombre || null,
+                clienteApellido: cliente?.apellido || null,
+                clienteDni: cliente?.dni || null,
+                clienteEmail: cliente?.email || null,
+                codigoComprobante: generarCodigoComprobante(),
+                estado: "PENDIENTE",
+                metodoPago: metodoPago || null,
                 total: total,
                 detalles: { create: detalles }
             },
             include: { detalles: true }
         });
+
+        for (const detalle of detalles) {
+            await tx.producto.update({
+                where: { id: detalle.productoId },
+                data: { stockReservado: { increment: detalle.cantidad } }
+            });
+        }
+
+        return venta;
+    });
+
+    return resultado;
+}
+
+async function cobrarVenta(ventaId, metodoPago) {
+    const resultado = await prisma.$transaction(async (tx) => {
+        const venta = await tx.venta.findUnique({
+            where: { id: ventaId },
+            include: { detalles: true }
+        });
+
+        if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+        if (venta.estado !== "PENDIENTE") {
+            throw new ErrorPersonalizado(
+                "Solo se pueden cobrar ventas en estado PENDIENTE (estado actual: " + venta.estado + ")",
+                400
+            );
+        }
+
+        for (const detalle of venta.detalles) {
+            const producto = await tx.producto.findUnique({ where: { id: detalle.productoId } });
+            if (producto.stock < detalle.cantidad) {
+                throw new ErrorPersonalizado(
+                    "Stock fisico insuficiente para cobrar: " + producto.nombre,
+                    400
+                );
+            }
+        }
 
         for (const detalle of venta.detalles) {
             await tx.movimientoStock.create({
@@ -54,39 +116,88 @@ async function registrarVenta(usuarioId, items) {
             });
             await tx.producto.update({
                 where: { id: detalle.productoId },
-                data: { stock: { decrement: detalle.cantidad } }
+                data: {
+                    stock: { decrement: detalle.cantidad },
+                    stockReservado: { decrement: detalle.cantidad }
+                }
             });
         }
 
-        return venta;
+        const ventaCobrada = await tx.venta.update({
+            where: { id: ventaId },
+            data: {
+                estado: "COBRADA",
+                metodoPago: metodoPago
+            },
+            include: { detalles: true }
+        });
+
+        return ventaCobrada;
     });
 
     return resultado;
 }
 
-async function listarVentas(pagina, limite) {
-    const paginaActual = pagina || 1;
-    const limiteActual = limite || 10;
-    const saltar = (paginaActual - 1) * limiteActual;
+async function cancelarVenta(ventaId) {
+    const resultado = await prisma.$transaction(async (tx) => {
+        const venta = await tx.venta.findUnique({
+            where: { id: ventaId },
+            include: { detalles: true }
+        });
+
+        if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+        if (venta.estado !== "PENDIENTE") {
+            throw new ErrorPersonalizado(
+                "Solo se pueden cancelar ventas en estado PENDIENTE (estado actual: " + venta.estado + ")",
+                400
+            );
+        }
+
+        for (const detalle of venta.detalles) {
+            await tx.producto.update({
+                where: { id: detalle.productoId },
+                data: { stockReservado: { decrement: detalle.cantidad } }
+            });
+        }
+
+        const ventaCancelada = await tx.venta.update({
+            where: { id: ventaId },
+            data: { estado: "CANCELADA" },
+            include: { detalles: true }
+        });
+
+        return ventaCancelada;
+    });
+
+    return resultado;
+}
+
+async function listarVentas(filtros) {
+    const pagina = filtros.pagina || 1;
+    const limite = filtros.limite || 10;
+    const saltar = (pagina - 1) * limite;
+
+    const where = filtros.estado ? { estado: filtros.estado } : {};
 
     const [ventas, total] = await prisma.$transaction([
         prisma.venta.findMany({
+            where: where,
             include: {
                 detalles: true,
                 usuario: { select: { id: true, nombre: true, apellido: true } }
             },
-            orderBy: { fecha: "desc" },
+            orderBy: { creadoEn: "desc" },
             skip: saltar,
-            take: limiteActual
+            take: limite
         }),
-        prisma.venta.count()
+        prisma.venta.count({ where: where })
     ]);
 
     return {
         ventas: ventas,
         paginacion: {
-            paginaActual: paginaActual,
-            totalPaginas: Math.ceil(total / limiteActual),
+            paginaActual: pagina,
+            totalPaginas: Math.ceil(total / limite),
             totalRegistros: total
         }
     };
@@ -104,4 +215,23 @@ async function obtenerVentaPorId(id) {
     return venta;
 }
 
-module.exports = { registrarVenta, listarVentas, obtenerVentaPorId };
+async function obtenerVentaPorCodigoComprobante(codigo) {
+    const venta = await prisma.venta.findUnique({
+        where: { codigoComprobante: codigo },
+        include: {
+            detalles: { include: { producto: true } },
+            usuario: { select: { id: true, nombre: true, apellido: true } }
+        }
+    });
+    if (!venta) throw new ErrorPersonalizado("Comprobante no encontrado", 404);
+    return venta;
+}
+
+module.exports = {
+    registrarVenta,
+    cobrarVenta,
+    cancelarVenta,
+    listarVentas,
+    obtenerVentaPorId,
+    obtenerVentaPorCodigoComprobante
+};
