@@ -38,15 +38,16 @@ model Usuario {
 
 // Productos disponibles para la venta
 model Producto {
-  id            String   @id @default(uuid())
-  nombre        String
-  descripcion   String?
-  precio        Decimal  @db.Decimal(10, 2)
-  stock         Int      @default(0)
-  categoria     String
-  activo        Boolean  @default(true)
-  creadoEn      DateTime @default(now()) @map("creado_en")
-  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+  id             String   @id @default(uuid())
+  nombre         String
+  descripcion    String?
+  precio         Decimal  @db.Decimal(10, 2)
+  stock          Int      @default(0)
+  stockReservado Int      @default(0) @map("stock_reservado")
+  categoria      String
+  activo         Boolean  @default(true)
+  creadoEn       DateTime @default(now()) @map("creado_en")
+  actualizadoEn  DateTime @updatedAt @map("actualizado_en")
 
   detallesVenta    DetalleVenta[]
   movimientosStock MovimientoStock[]
@@ -54,14 +55,30 @@ model Producto {
   @@map("productos")
 }
 
+// Estado actual de una venta en su ciclo de vida
+enum EstadoVenta {
+  PENDIENTE
+  COBRADA
+  CANCELADA
+}
+
 // Registro de cada venta realizada
 model Venta {
-  id        String   @id @default(uuid())
-  fecha     DateTime @default(now())
-  total     Decimal  @db.Decimal(10, 2)
-  usuarioId String   @map("usuario_id")
+  id                String      @id @default(uuid())
+  fecha             DateTime    @default(now())
+  total             Decimal     @db.Decimal(10, 2)
+  usuarioId         String?     @map("usuario_id")
+  clienteNombre     String?     @map("cliente_nombre")
+  clienteApellido   String?     @map("cliente_apellido")
+  clienteDni        String?     @map("cliente_dni")
+  clienteEmail      String?     @map("cliente_email")
+  codigoComprobante String      @unique @map("codigo_comprobante")
+  estado            EstadoVenta @default(PENDIENTE)
+  metodoPago        String?     @map("metodo_pago")
+  creadoEn          DateTime    @default(now()) @map("creado_en")
+  actualizadoEn     DateTime    @updatedAt @map("actualizado_en")
 
-  usuario  Usuario        @relation(fields: [usuarioId], references: [id])
+  usuario  Usuario?       @relation(fields: [usuarioId], references: [id])
   detalles DetalleVenta[]
 
   @@map("ventas")
