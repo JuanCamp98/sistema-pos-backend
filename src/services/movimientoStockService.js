@@ -16,8 +16,12 @@ async function registrarMovimiento(datos) {
     const producto = await prisma.producto.findUnique({ where: { id: productoId } });
     if (!producto || !producto.activo) throw new ErrorPersonalizado("Producto no encontrado", 404);
 
-    if (tipo === "SALIDA" && producto.stock < cantidad) {
-        throw new ErrorPersonalizado("Stock insuficiente para realizar la salida", 400);
+    const stockDisponible = producto.stock - producto.stockReservado;
+    if (tipo === "SALIDA" && stockDisponible < cantidad) {
+        throw new ErrorPersonalizado(
+            "Stock insuficiente para realizar la salida (disponible: " + stockDisponible + ")",
+            400
+        );
     }
 
     const nuevoStock = tipo === "ENTRADA"
