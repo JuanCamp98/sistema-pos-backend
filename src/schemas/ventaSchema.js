@@ -19,7 +19,8 @@ const registrarVentaSchema = z.object({
 });
 
 const cobrarVentaSchema = z.object({
-    metodoPago: z.string().min(1, "El metodo de pago es obligatorio")
+    metodoPago: z.string().min(1, "El metodo de pago es obligatorio"),
+    codigoComprobante: z.string().optional()
 });
 
 const cancelarVentaSchema = z.object({}).optional();
