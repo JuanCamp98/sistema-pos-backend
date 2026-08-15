@@ -43,28 +43,82 @@ async function registrarMovimiento(datos) {
 }
 
 async function listarMovimientos(pagina, limite) {
-    const paginaActual = pagina || 1;
-    const limiteActual = limite || 10;
-    const saltar = (paginaActual - 1) * limiteActual;
+    return listarHistorialMovimientos({ page: pagina, limit: limite });
+}
 
-    const [movimientos, total] = await prisma.$transaction([
-        prisma.movimientoStock.findMany({
-            include: { producto: true },
-            orderBy: { creadoEn: "desc" },
+async function listarStock(pagina, limite) {
+    const saltar = (pagina - 1) * limite;
+
+    const [productos, total] = await prisma.$transaction([
+        prisma.producto.findMany({
+            where: { activo: true },
+            select: {
+                id: true,
+                nombre: true,
+                categoria: true,
+                stock: true,
+                stockReservado: true
+            },
+            orderBy: { nombre: "asc" },
             skip: saltar,
-            take: limiteActual
+            take: limite
         }),
-        prisma.movimientoStock.count()
+        prisma.producto.count({ where: { activo: true } })
     ]);
 
     return {
-        movimientos: movimientos,
-        paginacion: {
-            paginaActual: paginaActual,
-            totalPaginas: Math.ceil(total / limiteActual),
-            totalRegistros: total
-        }
+        data: productos.map((producto) => ({
+            ...producto,
+            stockDisponible: producto.stock - producto.stockReservado
+        })),
+        total,
+        page: pagina,
+        limit: limite
     };
+}
+
+async function listarHistorialMovimientos(filtros) {
+    const { page, limit, productoId, tipo, motivo, desde, hasta } = filtros;
+    const saltar = (page - 1) * limit;
+    const where = {
+        ...(productoId && { productoId }),
+        ...(tipo && { tipo }),
+        ...(motivo && { motivo }),
+        ...((desde || hasta) && {
+            creadoEn: {
+                ...(desde && { gte: desde }),
+                ...(hasta && { lte: hasta })
+            }
+        })
+    };
+
+    const [movimientos, total] = await prisma.$transaction([
+        prisma.movimientoStock.findMany({
+            where,
+            include: { producto: true },
+            orderBy: { creadoEn: "desc" },
+            skip: saltar,
+            take: limit
+        }),
+        prisma.movimientoStock.count({ where })
+    ]);
+
+    return {
+        data: movimientos,
+        total,
+        page,
+        limit
+    };
+}
+
+async function ajustarStock(productoId, datos) {
+    return registrarMovimiento({
+        productoId,
+        tipo: datos.tipo,
+        motivo: "AJUSTE_MANUAL",
+        cantidad: datos.cantidad,
+        referenciaId: datos.referenciaId
+    });
 }
 
 async function listarMovimientosPorProducto(productoId) {
@@ -75,4 +129,11 @@ async function listarMovimientosPorProducto(productoId) {
     return movimientos;
 }
 
-module.exports = { registrarMovimiento, listarMovimientos, listarMovimientosPorProducto };
+module.exports = {
+    registrarMovimiento,
+    listarMovimientos,
+    listarStock,
+    listarHistorialMovimientos,
+    listarMovimientosPorProducto,
+    ajustarStock
+};

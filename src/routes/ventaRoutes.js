@@ -36,14 +36,6 @@ router.get(
     ventaController.buscarPorComprobante
 );
 
-// POST /ventas/comprobante/:codigo/cobrar: publico para que un cliente anonimo pueda
-// completar el pago usando el codigo de comprobante (guest checkout).
-router.post(
-    "/comprobante/:codigo/cobrar",
-    validar(cobrarVentaSchema),
-    ventaController.pagarPorComprobante
-);
-
 // GET /ventas/:id: solo Cajero o Administrador.
 router.get(
     "/:id",
@@ -52,8 +44,8 @@ router.get(
     ventaController.obtenerPorId
 );
 
-// PATCH /ventas/:id/cobrar: permite cobro por cajero/administrador autenticado
-// o por cliente anonimo que provea el `codigoComprobante` en el body.
+// PATCH /ventas/:id/cobrar: Cajero/Admin con token, o cliente anonimo
+// que pasa su codigoComprobante en el body (validado en el service).
 router.patch(
     "/:id/cobrar",
     intentarAutenticar,

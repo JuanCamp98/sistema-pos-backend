@@ -79,7 +79,7 @@ async function registrarVenta(usuarioId, datos) {
     return resultado;
 }
 
-async function cobrarVenta(ventaId, metodoPago) {
+async function cobrarVenta(ventaId, metodoPago, codigoComprobanteCliente) {
     const resultado = await prisma.$transaction(async (tx) => {
         const venta = await tx.venta.findUnique({
             where: { id: ventaId },
@@ -87,6 +87,14 @@ async function cobrarVenta(ventaId, metodoPago) {
         });
 
         if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+
+        // Si se pasa codigoComprobante, validar que coincida con la venta.
+        // Esto permite que el cliente anonimo cobre su propia venta sin login
+        // (porque es el unico que conoce el codigo).
+        if (codigoComprobanteCliente && codigoComprobanteCliente !== venta.codigoComprobante) {
+            throw new ErrorPersonalizado("El codigo de comprobante no coincide", 403);
+        }
+
         if (venta.estado !== "PENDIENTE") {
             throw new ErrorPersonalizado(
                 "Solo se pueden cobrar ventas en estado PENDIENTE (estado actual: " + venta.estado + ")",
@@ -177,7 +185,16 @@ async function listarVentas(filtros) {
     const limite = filtros.limite || 10;
     const saltar = (pagina - 1) * limite;
 
-    const where = filtros.estado ? { estado: filtros.estado } : {};
+    const where = {
+        ...(filtros.estado && { estado: filtros.estado }),
+        ...(filtros.clienteId && { usuarioId: filtros.clienteId }),
+        ...((filtros.fechaDesde || filtros.fechaHasta) && {
+            fecha: {
+                ...(filtros.fechaDesde && { gte: filtros.fechaDesde }),
+                ...(filtros.fechaHasta && { lte: filtros.fechaHasta })
+            }
+        })
+    };
 
     const [ventas, total] = await prisma.$transaction([
         prisma.venta.findMany({

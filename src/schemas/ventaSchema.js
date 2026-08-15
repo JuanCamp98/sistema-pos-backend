@@ -19,7 +19,8 @@ const registrarVentaSchema = z.object({
 });
 
 const cobrarVentaSchema = z.object({
-    metodoPago: z.string().min(1, "El metodo de pago es obligatorio")
+    metodoPago: z.string().min(1, "El metodo de pago es obligatorio"),
+    codigoComprobante: z.string().optional()
 });
 
 const cancelarVentaSchema = z.object({}).optional();
@@ -27,8 +28,14 @@ const cancelarVentaSchema = z.object({}).optional();
 const listarVentasQuerySchema = z.object({
     pagina: z.coerce.number().int().positive().optional(),
     limite: z.coerce.number().int().positive().optional(),
-    estado: z.enum(["PENDIENTE", "COBRADA", "CANCELADA"]).optional()
-});
+    estado: z.enum(["PENDIENTE", "COBRADA", "CANCELADA"]).optional(),
+    fechaDesde: z.coerce.date().optional(),
+    fechaHasta: z.coerce.date().optional(),
+    clienteId: z.string().uuid("El id de cliente no es valido").optional()
+}).refine(
+    (filtros) => !filtros.fechaDesde || !filtros.fechaHasta || filtros.fechaDesde <= filtros.fechaHasta,
+    { message: "La fecha desde no puede ser posterior a la fecha hasta" }
+);
 
 module.exports = {
     registrarVentaSchema,
