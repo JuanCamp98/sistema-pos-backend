@@ -9,12 +9,11 @@ Backend del sistema POS Web encargado de gestionar la lógica de negocio, autent
 La documentación detallada del proyecto (modelo de datos, endpoints, decisiones técnicas) está en el siguiente Google Doc:
 
 [Documentación del proyecto](https://docs.google.com/document/d/1U9A7sZCXHqEEOIHKMWEZhd4TZFbID6rypjZ4SzBhiS0/edit?usp=sharing)
-
+[Tablero del proyecto] (https://trello.com/b/kgiBW9pP/pos-web)
 ## Integrantes
 
 * Corti Pedro Pablo
 * Campuzano Juan Ignacio
-* Centeno Lucas
 
 ## Tecnologías Utilizadas
 
