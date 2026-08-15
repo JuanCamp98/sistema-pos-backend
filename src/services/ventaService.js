@@ -185,7 +185,16 @@ async function listarVentas(filtros) {
     const limite = filtros.limite || 10;
     const saltar = (pagina - 1) * limite;
 
-    const where = filtros.estado ? { estado: filtros.estado } : {};
+    const where = {
+        ...(filtros.estado && { estado: filtros.estado }),
+        ...(filtros.clienteId && { usuarioId: filtros.clienteId }),
+        ...((filtros.fechaDesde || filtros.fechaHasta) && {
+            fecha: {
+                ...(filtros.fechaDesde && { gte: filtros.fechaDesde }),
+                ...(filtros.fechaHasta && { lte: filtros.fechaHasta })
+            }
+        })
+    };
 
     const [ventas, total] = await prisma.$transaction([
         prisma.venta.findMany({
