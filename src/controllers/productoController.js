@@ -1,4 +1,6 @@
 const productoService = require("../services/productoService");
+const { paginacionProductoSchema } = require("../schemas/productoSchema");
+const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
 async function crear(req, res, next) {
     try {
@@ -12,9 +14,12 @@ async function crear(req, res, next) {
 
 async function listar(req, res, next) {
     try {
-        const pagina = parseInt(req.query.pagina);
-        const limite = parseInt(req.query.limite);
-        const resultado = await productoService.listarProductos(pagina, limite);
+        const resultadoPaginacion = paginacionProductoSchema.safeParse(req.query);
+        if (!resultadoPaginacion.success) {
+            throw new ErrorPersonalizado("Los parametros page y limit deben ser enteros positivos", 400);
+        }
+        const { page, limit } = resultadoPaginacion.data;
+        const resultado = await productoService.listarProductos(page, limit);
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
@@ -39,7 +44,7 @@ async function actualizar(req, res, next) {
 async function eliminar(req, res, next) {
     try {
         await productoService.eliminarProducto(req.params.id);
-        res.status(200).json({ mensaje: "Producto eliminado correctamente" });
+        res.status(204).send();
     } catch (error) { next(error); }
 }
 
