@@ -4,8 +4,12 @@ const clienteSchema = z.object({
     nombre: z.string().min(1, "El nombre del cliente es obligatorio"),
     apellido: z.string().min(1, "El apellido del cliente es obligatorio"),
     dni: z.string().min(1, "El DNI del cliente es obligatorio"),
-    email: z.string().email("El email del cliente no es valido")
-});
+    email: z.string().email("El email del cliente no es valido"),
+    confirmarEmail: z.string().email("La confirmacion de email no es valida")
+}).refine(
+    (cliente) => cliente.email.toLowerCase() === cliente.confirmarEmail.toLowerCase(),
+    { message: "Los emails no coinciden", path: ["confirmarEmail"] }
+);
 
 const registrarVentaSchema = z.object({
     items: z.array(
