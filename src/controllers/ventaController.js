@@ -1,4 +1,6 @@
 const ventaService = require("../services/ventaService");
+const { listarVentasQuerySchema } = require("../schemas/ventaSchema");
+const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
 async function registrar(req, res, next) {
     try {
@@ -14,10 +16,11 @@ async function registrar(req, res, next) {
 async function cobrar(req, res, next) {
     try {
         const codigoComprobante = req.body.codigoComprobante || null;
-        const ventaCobrada = await ventaService.cobrarVenta(req.params.id, req.body.metodoPago, codigoComprobante);
+        const resultado = await ventaService.cobrarVenta(req.params.id, req.body.metodoPago, codigoComprobante);
         res.status(200).json({
             mensaje: "Venta cobrada correctamente",
-            venta: ventaCobrada
+            venta: resultado.venta,
+            correo: resultado.correo
         });
     } catch (error) { next(error); }
 }
@@ -34,12 +37,11 @@ async function cancelar(req, res, next) {
 
 async function listar(req, res, next) {
     try {
-        const filtros = {
-            pagina: req.query.pagina ? parseInt(req.query.pagina) : undefined,
-            limite: req.query.limite ? parseInt(req.query.limite) : undefined,
-            estado: req.query.estado || undefined
-        };
-        const resultado = await ventaService.listarVentas(filtros);
+        const resultadoFiltros = listarVentasQuerySchema.safeParse(req.query);
+        if (!resultadoFiltros.success) {
+            throw new ErrorPersonalizado("Los filtros de ventas no son validos", 400);
+        }
+        const resultado = await ventaService.listarVentas(resultadoFiltros.data);
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }

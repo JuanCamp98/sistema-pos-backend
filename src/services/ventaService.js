@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
+const mailService = require("./mailService");
 
 function generarCodigoComprobante() {
     const fecha = new Date();
@@ -137,13 +138,27 @@ async function cobrarVenta(ventaId, metodoPago, codigoComprobanteCliente) {
                 estado: "COBRADA",
                 metodoPago: metodoPago
             },
-            include: { detalles: true }
+            include: {
+                detalles: { include: { producto: { select: { nombre: true } } } },
+                usuario: { select: { email: true } }
+            }
         });
 
         return ventaCobrada;
     });
 
-    return resultado;
+    try {
+        const correo = await mailService.enviarComprobanteVenta(resultado);
+        const { usuario, ...venta } = resultado;
+        return { venta, correo };
+    } catch (error) {
+        console.error("No se pudo enviar el comprobante de la venta " + resultado.id, error);
+        const { usuario, ...venta } = resultado;
+        return {
+            venta,
+            correo: { enviado: false, estado: "ERROR", motivo: "No se pudo enviar el comprobante" }
+        };
+    }
 }
 
 async function cancelarVenta(ventaId) {
