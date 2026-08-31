@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const mailService = require("./mailService");
+const { calcularPaginacion, calcularTotalPaginas } = require("../utils/paginacion");
 
 function generarCodigoComprobante() {
     const fecha = new Date();
@@ -196,9 +197,7 @@ async function cancelarVenta(ventaId) {
 }
 
 async function listarVentas(filtros) {
-    const pagina = filtros.pagina || 1;
-    const limite = filtros.limite || 10;
-    const saltar = (pagina - 1) * limite;
+    const { skip, take, page, limit } = calcularPaginacion(filtros.pagina, filtros.limite);
 
     const where = {
         ...(filtros.estado && { estado: filtros.estado }),
@@ -219,8 +218,8 @@ async function listarVentas(filtros) {
                 usuario: { select: { id: true, nombre: true, apellido: true } }
             },
             orderBy: { creadoEn: "desc" },
-            skip: saltar,
-            take: limite
+            skip: skip,
+            take: take
         }),
         prisma.venta.count({ where: where })
     ]);
@@ -228,8 +227,8 @@ async function listarVentas(filtros) {
     return {
         ventas: ventas,
         paginacion: {
-            paginaActual: pagina,
-            totalPaginas: Math.ceil(total / limite),
+            paginaActual: page,
+            totalPaginas: calcularTotalPaginas(total, limit),
             totalRegistros: total
         }
     };
