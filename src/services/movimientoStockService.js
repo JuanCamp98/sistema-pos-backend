@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
+const { calcularPaginacion } = require("../utils/paginacion");
 
 const MOTIVOS_PERMITIDOS_MANUAL = ["AJUSTE_MANUAL", "DEVOLUCION"];
 
@@ -47,7 +48,7 @@ async function listarMovimientos(pagina, limite) {
 }
 
 async function listarStock(pagina, limite) {
-    const saltar = (pagina - 1) * limite;
+    const { skip, take, page, limit } = calcularPaginacion(pagina, limite);
 
     const [productos, total] = await prisma.$transaction([
         prisma.producto.findMany({
@@ -60,8 +61,8 @@ async function listarStock(pagina, limite) {
                 stockReservado: true
             },
             orderBy: { nombre: "asc" },
-            skip: saltar,
-            take: limite
+            skip: skip,
+            take: take
         }),
         prisma.producto.count({ where: { activo: true } })
     ]);
@@ -72,14 +73,15 @@ async function listarStock(pagina, limite) {
             stockDisponible: producto.stock - producto.stockReservado
         })),
         total,
-        page: pagina,
-        limit: limite
+        page: page,
+        limit: limit
     };
 }
 
 async function listarHistorialMovimientos(filtros) {
-    const { page, limit, productoId, tipo, motivo, desde, hasta } = filtros;
-    const saltar = (page - 1) * limit;
+    const { skip, take, page, limit } = calcularPaginacion(filtros.page, filtros.limit);
+    const { productoId, tipo, motivo, desde, hasta } = filtros;
+
     const where = {
         ...(productoId && { productoId }),
         ...(tipo && { tipo }),
@@ -97,8 +99,8 @@ async function listarHistorialMovimientos(filtros) {
             where,
             include: { producto: true },
             orderBy: { creadoEn: "desc" },
-            skip: saltar,
-            take: limit
+            skip: skip,
+            take: take
         }),
         prisma.movimientoStock.count({ where })
     ]);

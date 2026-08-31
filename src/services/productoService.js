@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
+const { calcularPaginacion } = require("../utils/paginacion");
 
 async function crearProducto(datos) {
     const { nombre, descripcion, precio, stock, categoria } = datos;
@@ -16,16 +17,14 @@ async function crearProducto(datos) {
 }
 
 async function listarProductos(pagina, limite) {
-    const paginaActual = pagina;
-    const limiteActual = limite;
-    const saltar = (paginaActual - 1) * limiteActual;
+    const { skip, take, page, limit } = calcularPaginacion(pagina, limite);
 
     const [productos, total] = await prisma.$transaction([
         prisma.producto.findMany({
             where: { activo: true },
             orderBy: { nombre: "asc" },
-            skip: saltar,
-            take: limiteActual
+            skip: skip,
+            take: take
         }),
         prisma.producto.count({ where: { activo: true } })
     ]);
@@ -33,8 +32,8 @@ async function listarProductos(pagina, limite) {
     return {
         data: productos,
         total: total,
-        page: paginaActual,
-        limit: limiteActual
+        page: page,
+        limit: limit
     };
 }
 
