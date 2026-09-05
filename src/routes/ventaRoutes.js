@@ -6,6 +6,7 @@ const verificarRol = require("../middlewares/verificarRol");
 const validar = require("../middlewares/validar");
 const {
     registrarVentaSchema,
+    ventaDirectaSchema,
     cobrarVentaSchema,
     cancelarVentaSchema,
     listarVentasQuerySchema
@@ -19,6 +20,16 @@ router.post(
     intentarAutenticar,
     validar(registrarVentaSchema),
     ventaController.registrar
+);
+
+// POST /ventas/directa: solo Cajero o Administrador.
+// Permite registrar una venta directa de forma atómica desde el flujo de venta rápida.
+router.post(
+    "/directa",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    validar(ventaDirectaSchema),
+    ventaController.registrarDirecta
 );
 
 // GET /ventas: solo Cajero o Administrador. Acepta filtros ?estado= y paginacion.
