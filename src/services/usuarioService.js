@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
 
 async function registrarUsuario(datos) {
-    const { nombre, apellido, email, contrasena, rol } = datos;
+    const { nombre, apellido, dni, email, contrasena, rol } = datos;
 
     const rolEncontrado = await prisma.rol.findUnique({
         where: { nombre: rol }
@@ -14,12 +14,20 @@ async function registrarUsuario(datos) {
         throw new Error("El rol indicado no existe");
     }
 
-    const usuarioExistente = await prisma.usuario.findUnique({
+    const usuarioExistenteEmail = await prisma.usuario.findUnique({
         where: { email: email }
     });
 
-    if (usuarioExistente) {
+    if (usuarioExistenteEmail) {
         throw new Error("Ya existe un usuario con ese email");
+    }
+
+    const usuarioExistenteDni = await prisma.usuario.findUnique({
+        where: { dni: dni }
+    });
+
+    if (usuarioExistenteDni) {
+        throw new Error("Ya existe un usuario con ese DNI");
     }
 
     const contrasenaEncriptada = await bcrypt.hash(contrasena, 10);
@@ -28,6 +36,7 @@ async function registrarUsuario(datos) {
         data: {
             nombre: nombre,
             apellido: apellido,
+            dni: dni,
             email: email,
             contrasena: contrasenaEncriptada,
             rolId: rolEncontrado.id
