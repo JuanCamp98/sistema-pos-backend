@@ -22,6 +22,32 @@ const registrarVentaSchema = z.object({
     metodoPago: z.string().min(1).optional()
 });
 
+const clienteVentaDirectaSchema = z.object({
+    nombre: z.string().trim().min(1, "El nombre del cliente no puede estar vacio").optional(),
+    apellido: z.string().trim().min(1, "El apellido del cliente no puede estar vacio").optional(),
+    dni: z.string().trim().min(1, "El DNI del cliente no puede estar vacio").optional(),
+    email: z.string().email("El email del cliente no es valido").optional(),
+    confirmarEmail: z.string().email("La confirmacion de email no es valida").optional()
+}).refine(
+    (cliente) => !cliente.confirmarEmail || (cliente.email && cliente.email.toLowerCase() === cliente.confirmarEmail.toLowerCase()),
+    { message: "Los emails no coinciden", path: ["confirmarEmail"] }
+).optional();
+
+const ventaDirectaSchema = z.object({
+    items: z.array(
+        z.object({
+            productoId: z.string().uuid("El id de producto no es valido"),
+            cantidad: z.number().int().positive("La cantidad debe ser mayor a cero")
+        })
+    ).min(1, "La venta debe tener al menos un producto"),
+    cliente: clienteVentaDirectaSchema,
+    metodoPago: z.string().min(1).optional(),
+    cobrar: z.boolean().optional()
+}).refine(
+    (data) => !data.cobrar || Boolean(data.metodoPago && data.metodoPago.trim().length > 0),
+    { message: "El metodo de pago es obligatorio para cobrar la venta directamente", path: ["metodoPago"] }
+);
+
 const cobrarVentaSchema = z.object({
     metodoPago: z.string().min(1, "El metodo de pago es obligatorio"),
     codigoComprobante: z.string().optional()
@@ -43,6 +69,7 @@ const listarVentasQuerySchema = z.object({
 
 module.exports = {
     registrarVentaSchema,
+    ventaDirectaSchema,
     cobrarVentaSchema,
     cancelarVentaSchema,
     listarVentasQuerySchema,

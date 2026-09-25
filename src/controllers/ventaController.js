@@ -13,6 +13,22 @@ async function registrar(req, res, next) {
     } catch (error) { next(error); }
 }
 
+async function registrarDirecta(req, res, next) {
+    try {
+        const usuarioId = req.usuario.id;
+        const resultado = await ventaService.registrarVentaDirecta(usuarioId, req.body);
+        const mensaje = resultado.cobradaDirectamente
+            ? "Venta directa registrada y cobrada correctamente"
+            : "Venta directa registrada correctamente";
+
+        res.status(201).json({
+            mensaje: mensaje,
+            venta: resultado.venta,
+            ...(resultado.correo && { correo: resultado.correo })
+        });
+    } catch (error) { next(error); }
+}
+
 async function cobrar(req, res, next) {
     try {
         const codigoComprobante = req.body.codigoComprobante || null;
@@ -62,6 +78,7 @@ async function buscarPorComprobante(req, res, next) {
 
 module.exports = {
     registrar,
+    registrarDirecta,
     cobrar,
     cancelar,
     listar,

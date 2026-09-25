@@ -65,7 +65,15 @@ async function registrarVenta(usuarioId, datos) {
                 total: total,
                 detalles: { create: detalles }
             },
-            include: { detalles: true }
+            include: {
+                detalles: {
+                    include: {
+                        producto: {
+                            select: { id: true, nombre: true, precio: true }
+                        }
+                    }
+                }
+            }
         });
 
         for (const detalle of detalles) {
@@ -258,8 +266,27 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
     return venta;
 }
 
+async function registrarVentaDirecta(cajeroId, datos) {
+    const venta = await registrarVenta(cajeroId, datos);
+
+    if (datos.cobrar && datos.metodoPago) {
+        const resultadoCobro = await cobrarVenta(venta.id, datos.metodoPago);
+        return {
+            venta: resultadoCobro.venta,
+            correo: resultadoCobro.correo,
+            cobradaDirectamente: true
+        };
+    }
+
+    return {
+        venta: venta,
+        cobradaDirectamente: false
+    };
+}
+
 module.exports = {
     registrarVenta,
+    registrarVentaDirecta,
     cobrarVenta,
     cancelarVenta,
     listarVentas,
