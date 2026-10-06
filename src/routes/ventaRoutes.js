@@ -6,6 +6,7 @@ const verificarRol = require("../middlewares/verificarRol");
 const validar = require("../middlewares/validar");
 const {
     registrarVentaSchema,
+    ventaDirectaSchema,
     cobrarVentaSchema,
     cancelarVentaSchema,
     listarVentasQuerySchema
@@ -19,6 +20,16 @@ router.post(
     intentarAutenticar,
     validar(registrarVentaSchema),
     ventaController.registrar
+);
+
+// POST /ventas/directa: solo Cajero o Administrador.
+// Permite registrar una venta directa de forma atómica desde el flujo de venta rápida.
+router.post(
+    "/directa",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    validar(ventaDirectaSchema),
+    ventaController.registrarDirecta
 );
 
 // GET /ventas: solo Cajero o Administrador. Acepta filtros ?estado= y paginacion.
@@ -36,6 +47,17 @@ router.get(
     ventaController.buscarPorComprobante
 );
 
+// Mercado Pago envía notificaciones sin sesión; el estado se verifica consultando su API.
+router.post("/webhook/mercadopago", ventaController.webhookMercadoPago);
+
+// El cajero consulta el estado confirmado por Mercado Pago mientras se muestra el QR.
+router.get(
+    "/:id/pago-qr",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    ventaController.consultarEstadoQr
+);
+
 // GET /ventas/:id: solo Cajero o Administrador.
 router.get(
     "/:id",
@@ -44,11 +66,11 @@ router.get(
     ventaController.obtenerPorId
 );
 
-// PATCH /ventas/:id/cobrar: Cajero/Admin con token, o cliente anonimo
-// que pasa su codigoComprobante en el body (validado en el service).
+// PATCH /ventas/:id/cobrar: solo Cajero o Administrador autenticado.
 router.patch(
     "/:id/cobrar",
-    intentarAutenticar,
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
     validar(cobrarVentaSchema),
     ventaController.cobrar
 );

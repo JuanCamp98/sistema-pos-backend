@@ -3,16 +3,13 @@ const usuarioController = require("../controllers/usuarioController");
 const verificarToken = require("../middlewares/verificarToken");
 const verificarRol = require("../middlewares/verificarRol");
 const validar = require("../middlewares/validar");
-const { registroSchema, loginSchema } = require("../schemas/usuarioSchema");
+const { registroSchema, publicRegistroSchema, loginSchema } = require("../schemas/usuarioSchema");
 const router = express.Router();
 
-// POST /usuarios/registro: solo Administrador puede crear usuarios.
-// Antes era publico y permitia autoasignarse cualquier rol.
+// POST /usuarios/registro: Permitido para publico (se asigna rol Cliente) y Administradores.
 router.post(
     "/registro",
-    verificarToken,
-    verificarRol(["Administrador"]),
-    validar(registroSchema),
+    validar(publicRegistroSchema),
     usuarioController.registrar
 );
 

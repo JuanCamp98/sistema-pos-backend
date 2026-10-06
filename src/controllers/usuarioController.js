@@ -3,7 +3,14 @@ const usuarioService = require("../services/usuarioService");
 
 async function registrar(req, res, next) {
     try {
-        const nuevoUsuario = await usuarioService.registrarUsuario(req.body);
+        let datos = { ...req.body };
+
+        // Si no hay usuario autenticado o no es Administrador, forzar el rol a 'Cliente'
+        if (!req.usuario || req.usuario.rol !== 'Administrador') {
+            datos.rol = 'Cliente';
+        }
+
+        const nuevoUsuario = await usuarioService.registrarUsuario(datos);
 
         res.status(201).json({
             mensaje: "Usuario registrado correctamente",
@@ -11,7 +18,8 @@ async function registrar(req, res, next) {
                 id: nuevoUsuario.id,
                 nombre: nuevoUsuario.nombre,
                 apellido: nuevoUsuario.apellido,
-                email: nuevoUsuario.email
+                email: nuevoUsuario.email,
+                dni: nuevoUsuario.dni
             }
         });
     } catch (error) {
