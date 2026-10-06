@@ -8,22 +8,30 @@ async function registrar(req, res, next) {
         const nuevaVenta = await ventaService.registrarVenta(usuarioId, req.body);
         res.status(201).json({
             mensaje: "Venta registrada correctamente",
-            venta: nuevaVenta
+            venta: nuevaVenta,
+            ...((nuevaVenta && nuevaVenta.pago) ? { pago: nuevaVenta.pago } : {})
         });
     } catch (error) { next(error); }
 }
 
 async function registrarDirecta(req, res, next) {
     try {
-        const usuarioId = req.usuario.id;
+        const usuarioId = req.usuario?.id;
+        if (!usuarioId) {
+            return res.status(401).json({ mensaje: "Se requiere autenticación para registrar una venta directa" });
+        }
+
         const resultado = await ventaService.registrarVentaDirecta(usuarioId, req.body);
-        const mensaje = resultado.cobradaDirectamente
-            ? "Venta directa registrada y cobrada correctamente"
-            : "Venta directa registrada correctamente";
+        const mensaje = resultado.pago
+            ? "QR generado; la venta queda pendiente hasta confirmar el pago"
+            : resultado.cobradaDirectamente
+                ? "Venta directa registrada y cobrada correctamente"
+                : "Venta directa registrada correctamente";
 
         res.status(201).json({
             mensaje: mensaje,
             venta: resultado.venta,
+            ...(resultado.pago && { pago: resultado.pago }),
             ...(resultado.correo && { correo: resultado.correo })
         });
     } catch (error) { next(error); }
@@ -31,8 +39,7 @@ async function registrarDirecta(req, res, next) {
 
 async function cobrar(req, res, next) {
     try {
-        const codigoComprobante = req.body.codigoComprobante || null;
-        const resultado = await ventaService.cobrarVenta(req.params.id, req.body.metodoPago, codigoComprobante);
+        const resultado = await ventaService.cobrarVenta(req.params.id, req.body.metodoPago);
         res.status(200).json({
             mensaje: "Venta cobrada correctamente",
             venta: resultado.venta,
@@ -76,6 +83,20 @@ async function buscarPorComprobante(req, res, next) {
     } catch (error) { next(error); }
 }
 
+async function consultarEstadoQr(req, res, next) {
+    try {
+        const resultado = await ventaService.consultarEstadoQr(req.params.id);
+        res.status(200).json(resultado);
+    } catch (error) { next(error); }
+}
+
+async function webhookMercadoPago(req, res, next) {
+    try {
+        await ventaService.procesarNotificacionQr(req.body);
+        res.sendStatus(200);
+    } catch (error) { next(error); }
+}
+
 module.exports = {
     registrar,
     registrarDirecta,
@@ -83,5 +104,7 @@ module.exports = {
     cancelar,
     listar,
     obtenerPorId,
-    buscarPorComprobante
+    buscarPorComprobante,
+    consultarEstadoQr,
+    webhookMercadoPago
 };

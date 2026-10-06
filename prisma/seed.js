@@ -16,7 +16,7 @@ async function upsertRol(nombre) {
     });
 }
 
-async function upsertUsuario(nombre, apellido, email, contrasena, rolNombre) {
+async function upsertUsuario(nombre, apellido, dni, email, contrasena, rolNombre) {
     const rol = await upsertRol(rolNombre);
     const contrasenaEncriptada = await bcrypt.hash(contrasena, 10);
     return prisma.usuario.upsert({
@@ -25,6 +25,7 @@ async function upsertUsuario(nombre, apellido, email, contrasena, rolNombre) {
         create: {
             nombre: nombre,
             apellido: apellido,
+            dni: dni,
             email: email,
             contrasena: contrasenaEncriptada,
             rolId: rol.id
@@ -90,8 +91,8 @@ async function main() {
     await upsertRol("Cliente");
 
     // Usuarios de prueba
-    await upsertUsuario("Admin", "Principal", "admin@pos.local", "admin123", "Administrador");
-    await upsertUsuario("Cajero", "Demo", "cajero@pos.local", "cajero123", "Cajero");
+    await upsertUsuario("Admin", "Principal", "30000000", "admin@pos.local", "admin123", "Administrador");
+    await upsertUsuario("Cajero", "Demo", "30000001", "cajero@pos.local", "cajero123", "Cajero");
 
     // Productos de ejemplo
     for (const producto of PRODUCTOS_EJEMPLO) {

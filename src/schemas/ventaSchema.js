@@ -48,12 +48,11 @@ const ventaDirectaSchema = z.object({
     { message: "El metodo de pago es obligatorio para cobrar la venta directamente", path: ["metodoPago"] }
 );
 
-const cobrarVentaSchema = z.object({
-    metodoPago: z.string().min(1, "El metodo de pago es obligatorio"),
-    codigoComprobante: z.string().optional()
-});
-
 const cancelarVentaSchema = z.object({}).optional();
+
+const cobrarVentaSchema = z.object({
+    metodoPago: z.string().min(1, "El metodo de pago es obligatorio")
+});
 
 const listarVentasQuerySchema = z.object({
     pagina: z.coerce.number().int().positive().optional(),
