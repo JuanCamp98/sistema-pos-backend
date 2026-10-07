@@ -336,14 +336,33 @@ async function obtenerVentaPorId(id) {
 }
 
 async function obtenerVentaPorCodigoComprobante(codigo) {
-    const venta = await prisma.venta.findUnique({
+    const incluirComprobante = {
+        detalles: { include: { producto: true } },
+        usuario: { select: { id: true, nombre: true, apellido: true } }
+    };
+    let venta = await prisma.venta.findUnique({
         where: { codigoComprobante: codigo },
-        include: {
-            detalles: { include: { producto: true } },
-            usuario: { select: { id: true, nombre: true, apellido: true } }
-        }
+        include: incluirComprobante
     });
     if (!venta) throw new ErrorPersonalizado("Comprobante no encontrado", 404);
+
+    if (venta.estado === "PENDIENTE" && venta.mpOrderId) {
+        let orden;
+        try {
+            orden = await mercadoPagoQrService.obtenerOrden(venta.mpOrderId);
+        } catch {
+            // El comprobante sigue disponible aunque Mercado Pago no responda momentaneamente.
+        }
+
+        if (orden && orden.status !== "created") {
+            await sincronizarOrdenQr(orden);
+            venta = await prisma.venta.findUnique({
+                where: { codigoComprobante: codigo },
+                include: incluirComprobante
+            });
+        }
+    }
+
     const { mpQrData, mpOrderId, mpOrderStatus, ...comprobante } = venta;
     return {
         ...comprobante,

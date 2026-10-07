@@ -2,6 +2,7 @@ const express = require("express");
 const ventaController = require("../controllers/ventaController");
 const verificarToken = require("../middlewares/verificarToken");
 const intentarAutenticar = require("../middlewares/intentarAutenticar");
+const verificarWebhookMercadoPago = require("../middlewares/verificarWebhookMercadoPago");
 const verificarRol = require("../middlewares/verificarRol");
 const validar = require("../middlewares/validar");
 const {
@@ -48,7 +49,11 @@ router.get(
 );
 
 // Mercado Pago envía notificaciones sin sesión; el estado se verifica consultando su API.
-router.post("/webhook/mercadopago", ventaController.webhookMercadoPago);
+router.post(
+    "/webhook/mercadopago",
+    verificarWebhookMercadoPago,
+    ventaController.webhookMercadoPago
+);
 
 // El cajero consulta el estado confirmado por Mercado Pago mientras se muestra el QR.
 router.get(

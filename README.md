@@ -74,15 +74,16 @@ La venta rápida puede generar un QR dinámico en ARS. La venta permanece pendie
 
 1. En Mercado Pago Developers, crea una aplicación y usa primero el Access Token de prueba.
 2. Crea una sucursal y una caja para Código QR. Configura `MP_QR_EXTERNAL_POS_ID` con el `external_id` de esa caja.
-3. Agrega estas variables al `.env` del backend. No publiques ni compartas el Access Token.
+3. Agrega estas variables al `.env` del backend. Copia `MP_WEBHOOK_SECRET` desde la configuración de Webhooks. No publiques ni compartas las credenciales.
 
 ```env
 MP_ACCESS_TOKEN=TEST-...
 MP_QR_EXTERNAL_POS_ID=POS-001
+MP_WEBHOOK_SECRET=...
 ```
 
 4. Aplica la migración de desarrollo con `npx prisma migrate dev`.
-5. En la aplicación de Developers, configura el webhook del tópico **Orders (Mercado Pago)** para `https://TU-DOMINIO/ventas/webhook/mercadopago`. Para desarrollo local, usa un túnel HTTPS y configura su URL pública.
+5. En la aplicación de Developers, configura el evento **Order (Mercado Pago)** para `https://TU-DOMINIO/ventas/webhook/mercadopago`, copia la clave secreta al `.env` y reinicia el backend. Para desarrollo local, usa un túnel HTTPS y configura su URL pública.
 6. Prueba con credenciales y cuentas de prueba antes de cambiar al Access Token de producción.
 
 El QR dinámico vence a los 15 minutos. El webhook solo dispara la sincronización: el backend consulta la order directamente a Mercado Pago antes de modificar el estado o descontar el stock.
