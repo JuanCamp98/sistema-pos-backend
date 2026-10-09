@@ -19,7 +19,9 @@ async function registrarUsuario(datos) {
     });
 
     if (usuarioExistenteEmail) {
-        throw new Error("Ya existe un usuario con ese email");
+        const error = new Error("Ya existe un usuario con ese email");
+        error.status = 409;
+        throw error;
     }
 
     const usuarioExistenteDni = await prisma.usuario.findUnique({
@@ -27,7 +29,9 @@ async function registrarUsuario(datos) {
     });
 
     if (usuarioExistenteDni) {
-        throw new Error("Ya existe un usuario con ese DNI");
+        const error = new Error("Ya existe un usuario con ese DNI");
+        error.status = 409;
+        throw error;
     }
 
     const contrasenaEncriptada = await bcrypt.hash(contrasena, 10);
