@@ -39,11 +39,16 @@ async function registrarDirecta(req, res, next) {
 
 async function cobrar(req, res, next) {
     try {
-        const resultado = await ventaService.cobrarVenta(req.params.id, req.body.metodoPago);
+        const resultado = await ventaService.cobrarVenta(
+            req.params.id,
+            req.body.metodoPago,
+            req.body.efectivoRecibido
+        );
         res.status(200).json({
             mensaje: "Venta cobrada correctamente",
             venta: resultado.venta,
-            correo: resultado.correo
+            correo: resultado.correo,
+            ...(resultado.cambio !== undefined ? { cambio: resultado.cambio } : {})
         });
     } catch (error) { next(error); }
 }

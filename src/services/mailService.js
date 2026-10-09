@@ -24,7 +24,7 @@ function crearContenido(venta) {
     }).join("\n");
 
     return [
-        "Comprobante de venta",
+        "Comprobante de compra",
         "",
         `Código: ${venta.codigoComprobante}`,
         `Fecha: ${fecha}`,

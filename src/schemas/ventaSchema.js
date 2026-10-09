@@ -51,7 +51,24 @@ const ventaDirectaSchema = z.object({
 const cancelarVentaSchema = z.object({}).optional();
 
 const cobrarVentaSchema = z.object({
-    metodoPago: z.string().min(1, "El metodo de pago es obligatorio")
+    metodoPago: z.string().min(1, "El metodo de pago es obligatorio"),
+    efectivoRecibido: z.number().finite().optional()
+}).superRefine((datos, contexto) => {
+    if (datos.metodoPago !== "Efectivo") return;
+
+    if (datos.efectivoRecibido === undefined) {
+        contexto.addIssue({
+            code: "custom",
+            message: "El efectivo recibido es obligatorio",
+            path: ["efectivoRecibido"]
+        });
+    } else if (datos.efectivoRecibido <= 0) {
+        contexto.addIssue({
+            code: "custom",
+            message: "El efectivo recibido debe ser mayor a 0",
+            path: ["efectivoRecibido"]
+        });
+    }
 });
 
 const listarVentasQuerySchema = z.object({

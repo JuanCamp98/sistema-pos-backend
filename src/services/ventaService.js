@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { Prisma } = require("@prisma/client");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const mailService = require("./mailService");
 const mercadoPagoQrService = require("./mercadoPagoQrService");
@@ -142,7 +143,8 @@ async function registrarVenta(usuarioId, datos) {
     return resultado;
 }
 
-async function cobrarVenta(ventaId, metodoPago) {
+async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
+    let cambio;
     const resultado = await prisma.$transaction(async (tx) => {
         const venta = await tx.venta.findUnique({
             where: { id: ventaId },
@@ -162,6 +164,19 @@ async function cobrarVenta(ventaId, metodoPago) {
                 "Solo se pueden cobrar ventas en estado PENDIENTE (estado actual: " + venta.estado + ")",
                 400
             );
+        }
+
+        if (metodoPago === "Efectivo") {
+            if (typeof efectivoRecibido !== "number" || !Number.isFinite(efectivoRecibido) || efectivoRecibido <= 0) {
+                throw new ErrorPersonalizado("El efectivo recibido debe ser un numero mayor a 0", 400);
+            }
+
+            const efectivoDecimal = new Prisma.Decimal(String(efectivoRecibido));
+            const totalDecimal = new Prisma.Decimal(venta.total.toString());
+            if (efectivoDecimal.lessThan(totalDecimal)) {
+                throw new ErrorPersonalizado("El efectivo recibido es insuficiente", 400);
+            }
+            cambio = efectivoDecimal.minus(totalDecimal).toNumber();
         }
 
         for (const detalle of venta.detalles) {
@@ -211,13 +226,14 @@ async function cobrarVenta(ventaId, metodoPago) {
     try {
         const correo = await mailService.enviarComprobanteVenta(resultado);
         const { usuario, ...venta } = resultado;
-        return { venta, correo };
+        return { venta, correo, ...(metodoPago === "Efectivo" ? { cambio } : {}) };
     } catch (error) {
         console.error("No se pudo enviar el comprobante de la venta " + resultado.id, error);
         const { usuario, ...venta } = resultado;
         return {
             venta,
-            correo: { enviado: false, estado: "ERROR", motivo: "No se pudo enviar el comprobante" }
+            correo: { enviado: false, estado: "ERROR", motivo: "No se pudo enviar el comprobante" },
+            ...(metodoPago === "Efectivo" ? { cambio } : {})
         };
     }
 }
