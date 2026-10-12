@@ -68,6 +68,14 @@ npm run dev
 * **Stock**: registro de movimientos (entradas/salidas) con historial
 * **Ventas**: registro de ventas con transacción atómica (descuenta stock automáticamente) e historial de ventas
 
+## Imágenes de productos
+
+El campo opcional `imagen` almacena una URL HTTP(S) o una ruta relativa de la imagen. Los productos existentes quedan con `imagen: null`. En desarrollo, aplicar el cambio de base de datos con `npx prisma migrate dev`; en despliegues, ejecutar `npx prisma migrate deploy`. Luego regenerar el cliente de Prisma con `npx prisma generate`.
+
+El alta y la edición administrativa aceptan una imagen JPG, PNG o WebP de hasta 5 MB como archivo multipart en el campo `imagen`. El backend valida el formato, guarda el archivo en `uploads/productos/` con un nombre generado y persiste una ruta como `/uploads/productos/<id>.jpg` en el producto. Express publica los archivos bajo `/uploads`. Si una imagen se reemplaza, el archivo anterior se elimina.
+
+El directorio `uploads/` debe persistir entre reinicios y despliegues. En Docker, montar un volumen persistente en ese directorio; si el alojamiento usa almacenamiento efímero, configurar un volumen persistente antes de producción o los archivos subidos podrían perderse.
+
 ## Mercado Pago QR
 
 La venta rápida puede generar un QR dinámico en ARS. La venta permanece pendiente y solo se marca como cobrada después de consultar una order `processed` en Mercado Pago.

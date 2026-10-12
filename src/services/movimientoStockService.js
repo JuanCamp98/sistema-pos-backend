@@ -56,6 +56,7 @@ async function listarStock(pagina, limite) {
             select: {
                 id: true,
                 nombre: true,
+                imagen: true,
                 categoria: true,
                 stock: true,
                 stockReservado: true

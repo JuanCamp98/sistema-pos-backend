@@ -1,15 +1,32 @@
 const productoService = require("../services/productoService");
+const imagenProductoService = require("../services/imagenProductoService");
 const { paginacionProductoSchema } = require("../schemas/productoSchema");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
 async function crear(req, res, next) {
+    let imagenGuardada;
     try {
-        const nuevoProducto = await productoService.crearProducto(req.body);
+        if (req.imagenProducto) {
+            imagenGuardada = await imagenProductoService.guardarImagenProducto(req.imagenProducto);
+        }
+        const datos = imagenGuardada
+            ? { ...req.body, imagen: imagenGuardada.ruta }
+            : req.body;
+        const nuevoProducto = await productoService.crearProducto(datos);
         res.status(201).json({
             mensaje: "Producto creado correctamente",
             producto: nuevoProducto
         });
-    } catch (error) { next(error); }
+    } catch (error) {
+        if (imagenGuardada) {
+            try {
+                await imagenProductoService.eliminarImagenProducto(imagenGuardada.ruta);
+            } catch (errorLimpieza) {
+                console.error("No se pudo limpiar la imagen de un producto que no se creó", errorLimpieza);
+            }
+        }
+        next(error);
+    }
 }
 
 async function listar(req, res, next) {
@@ -32,13 +49,39 @@ async function obtenerPorId(req, res, next) {
 }
 
 async function actualizar(req, res, next) {
+    let imagenGuardada;
+    let productoAnterior;
     try {
-        const productoActualizado = await productoService.actualizarProducto(req.params.id, req.body);
+        let datos = req.body;
+        if (req.imagenProducto) {
+            productoAnterior = await productoService.obtenerProductoPorId(req.params.id);
+            imagenGuardada = await imagenProductoService.guardarImagenProducto(req.imagenProducto);
+            datos = { ...datos, imagen: imagenGuardada.ruta };
+        }
+        const productoActualizado = await productoService.actualizarProducto(req.params.id, datos);
+        if (imagenGuardada && productoAnterior?.imagen) {
+            try {
+                await imagenProductoService.eliminarImagenProducto(productoAnterior.imagen);
+            } catch (errorLimpieza) {
+                if (errorLimpieza.code !== "ENOENT") {
+                    console.error("No se pudo eliminar la imagen anterior del producto", errorLimpieza);
+                }
+            }
+        }
         res.status(200).json({
             mensaje: "Producto actualizado correctamente",
             producto: productoActualizado
         });
-    } catch (error) { next(error); }
+    } catch (error) {
+        if (imagenGuardada) {
+            try {
+                await imagenProductoService.eliminarImagenProducto(imagenGuardada.ruta);
+            } catch (errorLimpieza) {
+                console.error("No se pudo limpiar una imagen de producto que no se actualizó", errorLimpieza);
+            }
+        }
+        next(error);
+    }
 }
 
 async function eliminar(req, res, next) {
