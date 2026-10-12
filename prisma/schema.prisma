@@ -42,6 +42,7 @@ model Producto {
   id             String   @id @default(uuid())
   nombre         String
   descripcion    String?
+  imagen         String?
   precio         Decimal  @db.Decimal(10, 2)
   stock          Int      @default(0)
   stockReservado Int      @default(0) @map("stock_reservado")

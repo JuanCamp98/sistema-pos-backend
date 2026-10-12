@@ -3,7 +3,7 @@ const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const { calcularPaginacion } = require("../utils/paginacion");
 
 async function crearProducto(datos) {
-    const { nombre, descripcion, precio, stock, categoria } = datos;
+    const { nombre, descripcion, imagen, precio, stock, categoria } = datos;
     const productoExistente = await prisma.producto.findFirst({
         where: { nombre, activo: true }
     });
@@ -11,7 +11,7 @@ async function crearProducto(datos) {
         throw new ErrorPersonalizado("Ya existe un producto activo con ese nombre", 409);
     }
     const nuevoProducto = await prisma.producto.create({
-        data: { nombre, descripcion, precio, stock, categoria }
+        data: { nombre, descripcion, imagen, precio, stock, categoria }
     });
     return nuevoProducto;
 }

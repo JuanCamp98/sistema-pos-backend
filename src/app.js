@@ -1,5 +1,6 @@
 // Configuracion principal de la aplicacion Express
 const express = require("express");
+const path = require("node:path");
 const cors = require("cors");
 
 const usuarioRoutes = require("./routes/usuarioRoutes");
@@ -13,6 +14,7 @@ const app = express();
 // Middlewares globales
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 // Ruta de prueba
 app.get("/", (req, res) => {
