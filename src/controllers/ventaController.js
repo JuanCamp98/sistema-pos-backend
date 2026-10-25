@@ -69,7 +69,11 @@ async function listar(req, res, next) {
         if (!resultadoFiltros.success) {
             throw new ErrorPersonalizado("Los filtros de ventas no son validos", 400);
         }
-        const resultado = await ventaService.listarVentas(resultadoFiltros.data);
+        const filtros = { ...resultadoFiltros.data };
+        if (req.usuario && req.usuario.rol === "Cliente") {
+            filtros.clienteId = req.usuario.id;
+        }
+        const resultado = await ventaService.listarVentas(filtros);
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
@@ -77,6 +81,9 @@ async function listar(req, res, next) {
 async function obtenerPorId(req, res, next) {
     try {
         const venta = await ventaService.obtenerVentaPorId(req.params.id);
+        if (req.usuario && req.usuario.rol === "Cliente" && venta.usuarioId !== req.usuario.id) {
+            throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
+        }
         res.status(200).json({ venta: venta });
     } catch (error) { next(error); }
 }

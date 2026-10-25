@@ -319,7 +319,11 @@ async function listarVentas(filtros) {
         prisma.venta.findMany({
             where: where,
             include: {
-                detalles: true,
+                detalles: {
+                    include: {
+                        producto: true
+                    }
+                },
                 usuario: { select: { id: true, nombre: true, apellido: true } }
             },
             orderBy: { creadoEn: "desc" },
@@ -331,6 +335,7 @@ async function listarVentas(filtros) {
 
     return {
         ventas: ventas,
+        total: total,
         paginacion: {
             paginaActual: page,
             totalPaginas: calcularTotalPaginas(total, limit),
