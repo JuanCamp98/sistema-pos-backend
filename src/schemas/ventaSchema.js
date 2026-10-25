@@ -74,11 +74,20 @@ const cobrarVentaSchema = z.object({
 const listarVentasQuerySchema = z.object({
     pagina: z.coerce.number().int().positive().optional(),
     limite: z.coerce.number().int().positive().optional(),
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().optional(),
     estado: z.enum(["PENDIENTE", "COBRADA", "CANCELADA"]).optional(),
     fechaDesde: z.coerce.date().optional(),
     fechaHasta: z.coerce.date().optional(),
     clienteId: z.string().uuid("El id de cliente no es valido").optional()
-}).refine(
+}).transform((datos) => ({
+    pagina: datos.pagina ?? datos.page,
+    limite: datos.limite ?? datos.limit,
+    estado: datos.estado,
+    fechaDesde: datos.fechaDesde,
+    fechaHasta: datos.fechaHasta,
+    clienteId: datos.clienteId
+})).refine(
     (filtros) => !filtros.fechaDesde || !filtros.fechaHasta || filtros.fechaDesde <= filtros.fechaHasta,
     { message: "La fecha desde no puede ser posterior a la fecha hasta" }
 );

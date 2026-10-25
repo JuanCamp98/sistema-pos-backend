@@ -33,11 +33,11 @@ router.post(
     ventaController.registrarDirecta
 );
 
-// GET /ventas: solo Cajero o Administrador. Acepta filtros ?estado= y paginacion.
+// GET /ventas: Cajero, Administrador o Cliente autenticado. Acepta filtros ?estado= y paginacion.
 router.get(
     "/",
     verificarToken,
-    verificarRol(["Cajero", "Administrador"]),
+    verificarRol(["Cajero", "Administrador", "Cliente"]),
     ventaController.listar
 );
 
@@ -63,11 +63,11 @@ router.get(
     ventaController.consultarEstadoQr
 );
 
-// GET /ventas/:id: solo Cajero o Administrador.
+// GET /ventas/:id: Cajero, Administrador o Cliente autenticado (solo su propia compra).
 router.get(
     "/:id",
     verificarToken,
-    verificarRol(["Cajero", "Administrador"]),
+    verificarRol(["Cajero", "Administrador", "Cliente"]),
     ventaController.obtenerPorId
 );
 
