@@ -44,20 +44,25 @@ cd pos-web-backend
 npm install
 ```
 
-4. Crear un archivo `.env` en la raíz del proyecto con las siguientes variables:
-PORT=3000 
-DATABASE_URL=tu_url_de_conexion_a_postgres 
+4. Crear un archivo `.env` en la raíz del proyecto:
+
+```env
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:55432/template1?sslmode=disable
 JWT_SECRET=una_clave_secreta_cualquiera
-
-5. Levantar la base de datos local (dejar la terminal abierta):
-
-```bash
-npx prisma dev
 ```
 
-6. En otra terminal, ejecutar el servidor:
+5. Levantar la base de datos local en una terminal y dejarla abierta:
 
 ```bash
+npx prisma dev --name pos-pocho-local --port 3010 --db-port 55432 --shadow-db-port 55433
+```
+
+6. En otra terminal, aplicar las migraciones, cargar los datos iniciales e iniciar el servidor:
+
+```bash
+npx prisma migrate deploy
+node prisma/seed.js
 npm run dev
 ```
 
