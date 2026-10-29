@@ -98,4 +98,40 @@ async function listarPromocionesVigentes() {
     });
 }
 
-module.exports = { listarPromociones, obtenerPromocion, crearPromocion, actualizarPromocion, eliminarPromocion, listarPromocionesVigentes };
+async function calcularPrecioPromocional(db, producto) {
+    const promociones = await db.promocion.findMany({
+        where: {
+            activo: true,
+            fechaInicio: { lte: new Date() },
+            fechaFin: { gte: new Date() },
+            OR: [
+                { productos: { some: { productoId: producto.id } } },
+                { categorias: { some: { categoria: producto.categoria } } }
+            ]
+        },
+        select: { id: true, titulo: true, tipoDescuento: true, valorDescuento: true }
+    });
+
+    const precioOriginal = Number(producto.precio);
+    let mejor = null;
+    for (const promocion of promociones) {
+        const valor = Number(promocion.valorDescuento);
+        const precioFinal = promocion.tipoDescuento === "PORCENTAJE"
+            ? precioOriginal * (1 - valor / 100)
+            : Math.max(0, precioOriginal - valor);
+        if (!mejor || precioFinal < mejor.precioFinal) mejor = { ...promocion, precioFinal };
+    }
+
+    return {
+        precioOriginal,
+        precioFinal: mejor ? Math.round(mejor.precioFinal * 100) / 100 : precioOriginal,
+        promocion: mejor ? {
+            id: mejor.id,
+            titulo: mejor.titulo,
+            tipoDescuento: mejor.tipoDescuento,
+            valorDescuento: Number(mejor.valorDescuento)
+        } : null
+    };
+}
+
+module.exports = { listarPromociones, obtenerPromocion, crearPromocion, actualizarPromocion, eliminarPromocion, listarPromocionesVigentes, calcularPrecioPromocional };
