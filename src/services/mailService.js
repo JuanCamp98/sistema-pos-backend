@@ -144,4 +144,34 @@ async function enviarComprobanteVenta(venta) {
     };
 }
 
-module.exports = { enviarComprobanteVenta };
+async function enviarAvisoPedidoListo(venta) {
+    const destinatario = obtenerDestinatario(venta);
+    if (!destinatario) return { enviado: false, estado: "OMITIDO", motivo: "La venta no tiene un email de destinatario" };
+
+    const configuracion = obtenerConfiguracion();
+    if (!configuracion.host || !configuracion.user || !configuracion.pass) {
+        return { enviado: false, estado: "OMITIDO", motivo: "El servicio de correo no está configurado" };
+    }
+
+    const urlComprobante = configuracion.frontendUrl
+        ? `${configuracion.frontendUrl.replace(/\/$/, "")}/comprobante/${encodeURIComponent(venta.codigoComprobante)}`
+        : null;
+    const transportador = nodemailer.createTransport({
+        host: configuracion.host,
+        port: configuracion.port,
+        secure: configuracion.secure,
+        auth: { user: configuracion.user, pass: configuracion.pass }
+    });
+
+    await transportador.sendMail({
+        from: configuracion.from,
+        to: destinatario,
+        subject: `Tu pedido ${venta.codigoComprobante} está listo para retirar`,
+        text: `Tu pedido está listo para retirar.\n\nCódigo de comprobante: ${venta.codigoComprobante}${urlComprobante ? `\n\nVer comprobante: ${urlComprobante}` : ""}`,
+        html: `<main style="max-width: 620px; margin: 0 auto; padding: 28px; background: #ffffff; color: #1f2933; font-family: Arial, sans-serif; border: 1px solid #ddd7ca;"><p style="color: #24543d; font-size: 12px; letter-spacing: 2px; text-transform: uppercase;">Sistema POS</p><h1>Tu pedido está listo para retirar</h1><p>Ya podés pasar a retirar tu compra.</p><p><strong>Código de comprobante:</strong> ${escaparHtml(venta.codigoComprobante)}</p>${urlComprobante ? `<a href="${escaparHtml(urlComprobante)}" style="display: inline-block; margin-top: 16px; padding: 13px 20px; background: #24543d; color: #ffffff; font-weight: 700; text-decoration: none;">Ver comprobante</a>` : ""}</main>`
+    });
+
+    return { enviado: true, estado: "ENVIADO", destinatario };
+}
+
+module.exports = { enviarComprobanteVenta, enviarAvisoPedidoListo };

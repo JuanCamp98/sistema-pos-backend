@@ -81,7 +81,10 @@ const PRODUCTOS_EJEMPLO = [
 async function upsertProducto(datos) {
     const existente = await prisma.producto.findFirst({ where: { nombre: datos.nombre } });
     if (existente) return existente;
-    return prisma.producto.create({ data: datos });
+    const categoria = await prisma.categoria.upsert({ where: { nombre: datos.categoria }, update: {}, create: { nombre: datos.categoria } });
+    const tipoProducto = await prisma.tipoProducto.upsert({ where: { nombre: "General" }, update: {}, create: { nombre: "General" } });
+    const { categoria: _categoria, ...productoDatos } = datos;
+    return prisma.producto.create({ data: { ...productoDatos, categoriaId: categoria.id, tipoProductoId: tipoProducto.id } });
 }
 
 async function main() {

@@ -12,6 +12,8 @@ describe("TASK-012: Historial de compras del cliente", () => {
     let clienteA;
     let clienteB;
     let productoTest;
+    let categoriaTest;
+    let tipoProductoTest;
     let tokenClienteA;
     let tokenClienteB;
     let tokenCajero;
@@ -37,13 +39,23 @@ describe("TASK-012: Historial de compras del cliente", () => {
             create: { nombre: "Cajero" }
         });
 
+        categoriaTest = await prisma.categoria.create({
+            data: { nombre: "Test Historial " + Date.now() }
+        });
+        tipoProductoTest = await prisma.tipoProducto.upsert({
+            where: { nombre: "General" },
+            update: {},
+            create: { nombre: "General" }
+        });
+
         // Ensure product exists
         productoTest = await prisma.producto.create({
             data: {
                 nombre: "Producto Test Historial " + Date.now(),
                 precio: 1250.50,
                 stock: 100,
-                categoria: "Test",
+                categoriaId: categoriaTest.id,
+                tipoProductoId: tipoProductoTest.id,
                 activo: true
             }
         });
@@ -154,6 +166,9 @@ describe("TASK-012: Historial de compras del cliente", () => {
         }
         if (productoTest) {
             await prisma.producto.delete({ where: { id: productoTest.id } });
+        }
+        if (categoriaTest) {
+            await prisma.categoria.delete({ where: { id: categoriaTest.id } });
         }
         if (clienteA) {
             await prisma.usuario.delete({ where: { id: clienteA.id } });

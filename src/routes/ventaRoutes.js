@@ -89,4 +89,26 @@ router.patch(
     ventaController.cancelar
 );
 
+// Flujo de preparación y retiro: no modifica ni consulta el estado de Mercado Pago.
+router.patch(
+    "/:id/preparar",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    ventaController.preparar
+);
+
+router.patch(
+    "/:id/lista-para-retirar",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    ventaController.listaParaRetirar
+);
+
+router.patch(
+    "/:id/retirar",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    ventaController.retirar
+);
+
 module.exports = router;

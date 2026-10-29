@@ -46,7 +46,8 @@ model Producto {
   precio         Decimal  @db.Decimal(10, 2)
   stock          Int      @default(0)
   stockReservado Int      @default(0) @map("stock_reservado")
-  categoria      String
+  categoriaId    String   @map("categoria_id")
+  tipoProductoId String   @map("tipo_producto_id")
   activo         Boolean  @default(true)
   creadoEn       DateTime @default(now()) @map("creado_en")
   actualizadoEn  DateTime @updatedAt @map("actualizado_en")
@@ -54,8 +55,34 @@ model Producto {
   detallesVenta    DetalleVenta[]
   movimientosStock MovimientoStock[]
   promociones     PromocionProducto[]
+  categoriaRelacion Categoria @relation(fields: [categoriaId], references: [id], onDelete: Restrict)
+  tipoProducto      TipoProducto @relation(fields: [tipoProductoId], references: [id], onDelete: Restrict)
 
   @@map("productos")
+}
+
+model Categoria {
+  id          String     @id @default(uuid())
+  nombre      String     @unique
+  activo      Boolean    @default(true)
+  creadoEn    DateTime   @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  productos Producto[]
+
+  @@map("categorias")
+}
+
+model TipoProducto {
+  id          String     @id @default(uuid())
+  nombre      String     @unique
+  activo      Boolean    @default(true)
+  creadoEn    DateTime   @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  productos Producto[]
+
+  @@map("tipos_producto")
 }
 
 enum TipoDescuento {
@@ -106,7 +133,15 @@ model PromocionCategoria {
 enum EstadoVenta {
   PENDIENTE
   COBRADA
+  EN_PREPARACION
+  LISTA_PARA_RETIRAR
+  RETIRADA
   CANCELADA
+}
+
+enum OrigenVenta {
+  AUTOGESTION
+  RAPIDA
 }
 
 // Registro de cada venta realizada
@@ -121,6 +156,7 @@ model Venta {
   clienteEmail      String?     @map("cliente_email")
   codigoComprobante String      @unique @map("codigo_comprobante")
   estado            EstadoVenta @default(PENDIENTE)
+  origen            OrigenVenta @default(AUTOGESTION)
   metodoPago        String?     @map("metodo_pago")
   mpOrderId         String?     @unique @map("mp_order_id")
   mpOrderStatus     String?     @map("mp_order_status")

@@ -9,6 +9,7 @@ const movimientoStockRoutes = require("./routes/movimientoStockRoutes");
 const manejadorErrores = require("./middlewares/manejadorErrores");
 const ventaRoutes = require("./routes/ventaRoutes");
 const promocionRoutes = require("./routes/promocionRoutes");
+const clasificacionRoutes = require("./routes/clasificacionRoutes");
 
 const app = express();
 
@@ -28,6 +29,8 @@ app.use("/productos", productoRoutes);
 app.use("/stock", movimientoStockRoutes);
 app.use("/ventas", ventaRoutes);
 app.use("/promociones", promocionRoutes);
+app.use("/categorias", clasificacionRoutes("categoria"));
+app.use("/tipos-producto", clasificacionRoutes("tipoProducto"));
 
 // Middleware de manejo de errores, siempre al final
 app.use(manejadorErrores);
