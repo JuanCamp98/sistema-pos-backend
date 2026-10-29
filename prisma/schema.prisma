@@ -53,8 +53,53 @@ model Producto {
 
   detallesVenta    DetalleVenta[]
   movimientosStock MovimientoStock[]
+  promociones     PromocionProducto[]
 
   @@map("productos")
+}
+
+enum TipoDescuento {
+  PORCENTAJE
+  IMPORTE
+}
+
+model Promocion {
+  id             String        @id @default(uuid())
+  titulo         String
+  descripcion    String?
+  tipoDescuento  TipoDescuento @map("tipo_descuento")
+  valorDescuento Decimal       @map("valor_descuento") @db.Decimal(10, 2)
+  fechaInicio    DateTime      @map("fecha_inicio")
+  fechaFin       DateTime      @map("fecha_fin")
+  activo         Boolean       @default(true)
+  creadoEn       DateTime      @default(now()) @map("creado_en")
+  actualizadoEn  DateTime      @updatedAt @map("actualizado_en")
+
+  productos  PromocionProducto[]
+  categorias PromocionCategoria[]
+
+  @@map("promociones")
+}
+
+model PromocionProducto {
+  promocionId String @map("promocion_id")
+  productoId  String @map("producto_id")
+
+  promocion Promocion @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+  producto  Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  @@id([promocionId, productoId])
+  @@map("promociones_productos")
+}
+
+model PromocionCategoria {
+  promocionId String @map("promocion_id")
+  categoria   String
+
+  promocion Promocion @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+
+  @@id([promocionId, categoria])
+  @@map("promociones_categorias")
 }
 
 // Estado actual de una venta en su ciclo de vida

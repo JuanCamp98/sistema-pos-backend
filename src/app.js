@@ -8,6 +8,7 @@ const productoRoutes = require("./routes/productoRoutes");
 const movimientoStockRoutes = require("./routes/movimientoStockRoutes");
 const manejadorErrores = require("./middlewares/manejadorErrores");
 const ventaRoutes = require("./routes/ventaRoutes");
+const promocionRoutes = require("./routes/promocionRoutes");
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use("/usuarios", usuarioRoutes);
 app.use("/productos", productoRoutes);
 app.use("/stock", movimientoStockRoutes);
 app.use("/ventas", ventaRoutes);
+app.use("/promociones", promocionRoutes);
 
 // Middleware de manejo de errores, siempre al final
 app.use(manejadorErrores);
