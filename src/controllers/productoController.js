@@ -35,8 +35,8 @@ async function listar(req, res, next) {
         if (!resultadoPaginacion.success) {
             throw new ErrorPersonalizado("Los parametros de paginacion o filtros no son validos", 400);
         }
-        const { page, limit, nombre, categoria } = resultadoPaginacion.data;
-        const resultado = await productoService.listarProductos(page, limit, { nombre, categoria });
+        const { page, limit, nombre, categoria, categoriaId, tipoProductoId } = resultadoPaginacion.data;
+        const resultado = await productoService.listarProductos(page, limit, { nombre, categoria, categoriaId, tipoProductoId });
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }

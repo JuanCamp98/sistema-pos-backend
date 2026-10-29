@@ -63,6 +63,27 @@ async function cancelar(req, res, next) {
     } catch (error) { next(error); }
 }
 
+async function preparar(req, res, next) {
+    try {
+        const venta = await ventaService.marcarVentaEnPreparacion(req.params.id);
+        res.status(200).json({ mensaje: "La venta pasó a preparación", venta });
+    } catch (error) { next(error); }
+}
+
+async function listaParaRetirar(req, res, next) {
+    try {
+        const resultado = await ventaService.marcarVentaListaParaRetirar(req.params.id);
+        res.status(200).json({ mensaje: "La venta está lista para retirar", ...resultado });
+    } catch (error) { next(error); }
+}
+
+async function retirar(req, res, next) {
+    try {
+        const venta = await ventaService.marcarVentaRetirada(req.params.id);
+        res.status(200).json({ mensaje: "La venta fue entregada", venta });
+    } catch (error) { next(error); }
+}
+
 async function listar(req, res, next) {
     try {
         const resultadoFiltros = listarVentasQuerySchema.safeParse(req.query);
@@ -114,6 +135,9 @@ module.exports = {
     registrarDirecta,
     cobrar,
     cancelar,
+    preparar,
+    listaParaRetirar,
+    retirar,
     listar,
     obtenerPorId,
     buscarPorComprobante,

@@ -4,6 +4,7 @@ const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const mailService = require("./mailService");
 const mercadoPagoQrService = require("./mercadoPagoQrService");
 const { calcularPaginacion, calcularTotalPaginas } = require("../utils/paginacion");
+const { calcularPrecioPromocional } = require("./promocionService");
 
 function generarCodigoComprobante() {
     const fecha = new Date();
@@ -14,7 +15,7 @@ function generarCodigoComprobante() {
     return `V-${anio}${mes}${dia}-${random}`;
 }
 
-async function registrarVenta(usuarioId, datos) {
+async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
     const { items, cliente, metodoPago } = datos;
 
     if (!items || items.length === 0) {
@@ -43,13 +44,17 @@ async function registrarVenta(usuarioId, datos) {
                 );
             }
 
-            const subtotal = Number(producto.precio) * item.cantidad;
+            const precio = await calcularPrecioPromocional(tx, {
+                ...producto,
+                categoria: (await tx.categoria.findUnique({ where: { id: producto.categoriaId }, select: { nombre: true } })).nombre
+            });
+            const subtotal = precio.precioFinal * item.cantidad;
             total += subtotal;
 
             detalles.push({
                 productoId: producto.id,
                 cantidad: item.cantidad,
-                precioUnitario: producto.precio,
+                precioUnitario: precio.precioFinal,
                 subtotal: subtotal
             });
         }
@@ -63,6 +68,7 @@ async function registrarVenta(usuarioId, datos) {
                 clienteEmail: cliente?.email || null,
                 codigoComprobante: generarCodigoComprobante(),
                 estado: "PENDIENTE",
+                origen: origen,
                 metodoPago: metodoPago || null,
                 total: total,
                 detalles: { create: detalles }
@@ -238,6 +244,45 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
     }
 }
 
+async function cambiarEstadoRetiro(ventaId, estadoNuevo, estadosPermitidos) {
+    const venta = await prisma.venta.findUnique({ where: { id: ventaId } });
+    if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+    if (venta.origen !== "AUTOGESTION") {
+        throw new ErrorPersonalizado("Las ventas rápidas se entregan en el momento y no requieren preparación para retiro", 400);
+    }
+    if (!estadosPermitidos.includes(venta.estado)) {
+        throw new ErrorPersonalizado("La venta debe estar en " + estadosPermitidos.join(" o ") + " para avanzar a " + estadoNuevo, 400);
+    }
+
+    return prisma.venta.update({
+        where: { id: ventaId },
+        data: { estado: estadoNuevo },
+        include: {
+            detalles: { include: { producto: { select: { nombre: true } } } },
+            usuario: { select: { email: true } }
+        }
+    });
+}
+
+async function marcarVentaEnPreparacion(ventaId) {
+    return cambiarEstadoRetiro(ventaId, "EN_PREPARACION", ["COBRADA"]);
+}
+
+async function marcarVentaListaParaRetirar(ventaId) {
+    const venta = await cambiarEstadoRetiro(ventaId, "LISTA_PARA_RETIRAR", ["COBRADA", "EN_PREPARACION"]);
+    try {
+        const correo = await mailService.enviarAvisoPedidoListo(venta);
+        return { venta, correo };
+    } catch (error) {
+        console.error("No se pudo enviar el aviso de retiro de la venta " + venta.id, error);
+        return { venta, correo: { enviado: false, estado: "ERROR", motivo: "No se pudo enviar el aviso de retiro" } };
+    }
+}
+
+async function marcarVentaRetirada(ventaId) {
+    return cambiarEstadoRetiro(ventaId, "RETIRADA", ["LISTA_PARA_RETIRAR"]);
+}
+
 async function cancelarVenta(ventaId) {
     const venta = await prisma.venta.findUnique({ where: { id: ventaId } });
     if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
@@ -394,7 +439,7 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
 }
 
 async function registrarVentaDirecta(cajeroId, datos) {
-    const venta = await registrarVenta(cajeroId, datos);
+    const venta = await registrarVenta(cajeroId, datos, "RAPIDA");
 
     if (datos.cobrar && datos.metodoPago === "MercadoPago") {
         let qr;
@@ -587,6 +632,9 @@ module.exports = {
     registrarVenta,
     registrarVentaDirecta,
     cobrarVenta,
+    marcarVentaEnPreparacion,
+    marcarVentaListaParaRetirar,
+    marcarVentaRetirada,
     cancelarVenta,
     listarVentas,
     obtenerVentaPorId,

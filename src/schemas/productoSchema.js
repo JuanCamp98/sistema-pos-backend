@@ -19,7 +19,8 @@ const productoSchema = z.object({
     imagen: imagenSchema.nullable().optional(),
     precio: z.number().positive("El precio debe ser mayor a cero"),
     stock: z.number().int().min(0, "El stock no puede ser negativo"),
-    categoria: z.string().min(1, "La categoria es obligatoria")
+    categoriaId: z.string().min(1, "El id de categoria es obligatorio"),
+    tipoProductoId: z.string().min(1, "El id de tipo de producto es obligatorio")
 });
 
 const actualizarProductoSchema = productoSchema.partial().refine(
@@ -31,7 +32,9 @@ const paginacionProductoSchema = z.object({
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(10),
     nombre: z.string().trim().max(100).optional(),
-    categoria: z.string().max(100).optional()
+    categoria: z.string().trim().max(100).optional(),
+    categoriaId: z.string().min(1).optional(),
+    tipoProductoId: z.string().min(1).optional()
 });
 
 module.exports = { productoSchema, actualizarProductoSchema, paginacionProductoSchema };
