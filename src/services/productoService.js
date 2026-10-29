@@ -16,24 +16,39 @@ async function crearProducto(datos) {
     return nuevoProducto;
 }
 
-async function listarProductos(pagina, limite) {
+async function listarProductos(pagina, limite, filtros = {}) {
     const { skip, take, page, limit } = calcularPaginacion(pagina, limite);
+    const where = { activo: true };
 
-    const [productos, total] = await prisma.$transaction([
+    if (filtros.nombre) {
+        where.nombre = { contains: filtros.nombre, mode: "insensitive" };
+    }
+    if (filtros.categoria) {
+        where.categoria = filtros.categoria;
+    }
+
+    const [productos, total, productosConCategoria] = await prisma.$transaction([
         prisma.producto.findMany({
-            where: { activo: true },
+            where: where,
             orderBy: { nombre: "asc" },
             skip: skip,
             take: take
         }),
-        prisma.producto.count({ where: { activo: true } })
+        prisma.producto.count({ where: where }),
+        prisma.producto.findMany({
+            where: { activo: true },
+            select: { categoria: true },
+            distinct: ["categoria"],
+            orderBy: { categoria: "asc" }
+        })
     ]);
 
     return {
         data: productos,
         total: total,
         page: page,
-        limit: limit
+        limit: limit,
+        categorias: productosConCategoria.map(function (producto) { return producto.categoria; })
     };
 }
 

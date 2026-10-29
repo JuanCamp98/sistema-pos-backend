@@ -107,7 +107,8 @@ async function main() {
 
 main()
     .catch(function (error) {
-        console.log(error);
+        console.error(error);
+        process.exitCode = 1;
     })
     .finally(async function () {
         await prisma.$disconnect();

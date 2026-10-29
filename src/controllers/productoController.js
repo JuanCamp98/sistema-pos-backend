@@ -33,10 +33,10 @@ async function listar(req, res, next) {
     try {
         const resultadoPaginacion = paginacionProductoSchema.safeParse(req.query);
         if (!resultadoPaginacion.success) {
-            throw new ErrorPersonalizado("Los parametros page y limit deben ser enteros positivos", 400);
+            throw new ErrorPersonalizado("Los parametros de paginacion o filtros no son validos", 400);
         }
-        const { page, limit } = resultadoPaginacion.data;
-        const resultado = await productoService.listarProductos(page, limit);
+        const { page, limit, nombre, categoria } = resultadoPaginacion.data;
+        const resultado = await productoService.listarProductos(page, limit, { nombre, categoria });
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
