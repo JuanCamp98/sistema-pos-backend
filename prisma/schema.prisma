@@ -33,6 +33,7 @@ model Usuario {
 
   rol    Rol     @relation(fields: [rolId], references: [id])
   ventas Venta[]
+  notificaciones Notificacion[]
 
   @@map("usuarios")
 }
@@ -166,8 +167,25 @@ model Venta {
 
   usuario  Usuario?       @relation(fields: [usuarioId], references: [id])
   detalles DetalleVenta[]
+  notificaciones Notificacion[]
 
   @@map("ventas")
+}
+
+model Notificacion {
+  id         String    @id @default(uuid())
+  usuarioId  String    @map("usuario_id")
+  ventaId    String    @map("venta_id")
+  mensaje    String
+  creadaEn   DateTime  @default(now()) @map("creada_en")
+  leidaEn    DateTime? @map("leida_en")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  venta   Venta   @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, ventaId])
+  @@index([usuarioId, creadaEn])
+  @@map("notificaciones")
 }
 
 // Cada producto vendido dentro de una venta
