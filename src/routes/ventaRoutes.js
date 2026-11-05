@@ -2,6 +2,7 @@ const express = require("express");
 const ventaController = require("../controllers/ventaController");
 const verificarToken = require("../middlewares/verificarToken");
 const intentarAutenticar = require("../middlewares/intentarAutenticar");
+const verificarWebhookMercadoPago = require("../middlewares/verificarWebhookMercadoPago");
 const verificarRol = require("../middlewares/verificarRol");
 const validar = require("../middlewares/validar");
 const {
@@ -32,11 +33,11 @@ router.post(
     ventaController.registrarDirecta
 );
 
-// GET /ventas: solo Cajero o Administrador. Acepta filtros ?estado= y paginacion.
+// GET /ventas: Cajero, Administrador o Cliente autenticado. Acepta filtros ?estado= y paginacion.
 router.get(
     "/",
     verificarToken,
-    verificarRol(["Cajero", "Administrador"]),
+    verificarRol(["Cajero", "Administrador", "Cliente"]),
     ventaController.listar
 );
 
@@ -48,7 +49,11 @@ router.get(
 );
 
 // Mercado Pago envía notificaciones sin sesión; el estado se verifica consultando su API.
-router.post("/webhook/mercadopago", ventaController.webhookMercadoPago);
+router.post(
+    "/webhook/mercadopago",
+    verificarWebhookMercadoPago,
+    ventaController.webhookMercadoPago
+);
 
 // El cajero consulta el estado confirmado por Mercado Pago mientras se muestra el QR.
 router.get(
@@ -58,11 +63,11 @@ router.get(
     ventaController.consultarEstadoQr
 );
 
-// GET /ventas/:id: solo Cajero o Administrador.
+// GET /ventas/:id: Cajero, Administrador o Cliente autenticado (solo su propia compra).
 router.get(
     "/:id",
     verificarToken,
-    verificarRol(["Cajero", "Administrador"]),
+    verificarRol(["Cajero", "Administrador", "Cliente"]),
     ventaController.obtenerPorId
 );
 
@@ -82,6 +87,28 @@ router.patch(
     intentarAutenticar,
     validar(cancelarVentaSchema),
     ventaController.cancelar
+);
+
+// Flujo de preparación y retiro: no modifica ni consulta el estado de Mercado Pago.
+router.patch(
+    "/:id/preparar",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    ventaController.preparar
+);
+
+router.patch(
+    "/:id/lista-para-retirar",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    ventaController.listaParaRetirar
+);
+
+router.patch(
+    "/:id/retirar",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    ventaController.retirar
 );
 
 module.exports = router;

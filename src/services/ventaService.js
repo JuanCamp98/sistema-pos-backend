@@ -1,8 +1,10 @@
 const prisma = require("../config/prisma");
+const { Prisma } = require("@prisma/client");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const mailService = require("./mailService");
 const mercadoPagoQrService = require("./mercadoPagoQrService");
 const { calcularPaginacion, calcularTotalPaginas } = require("../utils/paginacion");
+const { calcularPrecioPromocional } = require("./promocionService");
 
 function generarCodigoComprobante() {
     const fecha = new Date();
@@ -13,7 +15,7 @@ function generarCodigoComprobante() {
     return `V-${anio}${mes}${dia}-${random}`;
 }
 
-async function registrarVenta(usuarioId, datos) {
+async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
     const { items, cliente, metodoPago } = datos;
 
     if (!items || items.length === 0) {
@@ -42,13 +44,17 @@ async function registrarVenta(usuarioId, datos) {
                 );
             }
 
-            const subtotal = Number(producto.precio) * item.cantidad;
+            const precio = await calcularPrecioPromocional(tx, {
+                ...producto,
+                categoria: (await tx.categoria.findUnique({ where: { id: producto.categoriaId }, select: { nombre: true } })).nombre
+            });
+            const subtotal = precio.precioFinal * item.cantidad;
             total += subtotal;
 
             detalles.push({
                 productoId: producto.id,
                 cantidad: item.cantidad,
-                precioUnitario: producto.precio,
+                precioUnitario: precio.precioFinal,
                 subtotal: subtotal
             });
         }
@@ -62,6 +68,7 @@ async function registrarVenta(usuarioId, datos) {
                 clienteEmail: cliente?.email || null,
                 codigoComprobante: generarCodigoComprobante(),
                 estado: "PENDIENTE",
+                origen: origen,
                 metodoPago: metodoPago || null,
                 total: total,
                 detalles: { create: detalles }
@@ -142,7 +149,8 @@ async function registrarVenta(usuarioId, datos) {
     return resultado;
 }
 
-async function cobrarVenta(ventaId, metodoPago) {
+async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
+    let cambio;
     const resultado = await prisma.$transaction(async (tx) => {
         const venta = await tx.venta.findUnique({
             where: { id: ventaId },
@@ -162,6 +170,19 @@ async function cobrarVenta(ventaId, metodoPago) {
                 "Solo se pueden cobrar ventas en estado PENDIENTE (estado actual: " + venta.estado + ")",
                 400
             );
+        }
+
+        if (metodoPago === "Efectivo") {
+            if (typeof efectivoRecibido !== "number" || !Number.isFinite(efectivoRecibido) || efectivoRecibido <= 0) {
+                throw new ErrorPersonalizado("El efectivo recibido debe ser un numero mayor a 0", 400);
+            }
+
+            const efectivoDecimal = new Prisma.Decimal(String(efectivoRecibido));
+            const totalDecimal = new Prisma.Decimal(venta.total.toString());
+            if (efectivoDecimal.lessThan(totalDecimal)) {
+                throw new ErrorPersonalizado("El efectivo recibido es insuficiente", 400);
+            }
+            cambio = efectivoDecimal.minus(totalDecimal).toNumber();
         }
 
         for (const detalle of venta.detalles) {
@@ -211,15 +232,55 @@ async function cobrarVenta(ventaId, metodoPago) {
     try {
         const correo = await mailService.enviarComprobanteVenta(resultado);
         const { usuario, ...venta } = resultado;
-        return { venta, correo };
+        return { venta, correo, ...(metodoPago === "Efectivo" ? { cambio } : {}) };
     } catch (error) {
         console.error("No se pudo enviar el comprobante de la venta " + resultado.id, error);
         const { usuario, ...venta } = resultado;
         return {
             venta,
-            correo: { enviado: false, estado: "ERROR", motivo: "No se pudo enviar el comprobante" }
+            correo: { enviado: false, estado: "ERROR", motivo: "No se pudo enviar el comprobante" },
+            ...(metodoPago === "Efectivo" ? { cambio } : {})
         };
     }
+}
+
+async function cambiarEstadoRetiro(ventaId, estadoNuevo, estadosPermitidos) {
+    const venta = await prisma.venta.findUnique({ where: { id: ventaId } });
+    if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+    if (venta.origen !== "AUTOGESTION") {
+        throw new ErrorPersonalizado("Las ventas rápidas se entregan en el momento y no requieren preparación para retiro", 400);
+    }
+    if (!estadosPermitidos.includes(venta.estado)) {
+        throw new ErrorPersonalizado("La venta debe estar en " + estadosPermitidos.join(" o ") + " para avanzar a " + estadoNuevo, 400);
+    }
+
+    return prisma.venta.update({
+        where: { id: ventaId },
+        data: { estado: estadoNuevo },
+        include: {
+            detalles: { include: { producto: { select: { nombre: true } } } },
+            usuario: { select: { email: true } }
+        }
+    });
+}
+
+async function marcarVentaEnPreparacion(ventaId) {
+    return cambiarEstadoRetiro(ventaId, "EN_PREPARACION", ["COBRADA"]);
+}
+
+async function marcarVentaListaParaRetirar(ventaId) {
+    const venta = await cambiarEstadoRetiro(ventaId, "LISTA_PARA_RETIRAR", ["COBRADA", "EN_PREPARACION"]);
+    try {
+        const correo = await mailService.enviarAvisoPedidoListo(venta);
+        return { venta, correo };
+    } catch (error) {
+        console.error("No se pudo enviar el aviso de retiro de la venta " + venta.id, error);
+        return { venta, correo: { enviado: false, estado: "ERROR", motivo: "No se pudo enviar el aviso de retiro" } };
+    }
+}
+
+async function marcarVentaRetirada(ventaId) {
+    return cambiarEstadoRetiro(ventaId, "RETIRADA", ["LISTA_PARA_RETIRAR"]);
 }
 
 async function cancelarVenta(ventaId) {
@@ -303,7 +364,11 @@ async function listarVentas(filtros) {
         prisma.venta.findMany({
             where: where,
             include: {
-                detalles: true,
+                detalles: {
+                    include: {
+                        producto: true
+                    }
+                },
                 usuario: { select: { id: true, nombre: true, apellido: true } }
             },
             orderBy: { creadoEn: "desc" },
@@ -315,6 +380,7 @@ async function listarVentas(filtros) {
 
     return {
         ventas: ventas,
+        total: total,
         paginacion: {
             paginaActual: page,
             totalPaginas: calcularTotalPaginas(total, limit),
@@ -336,14 +402,33 @@ async function obtenerVentaPorId(id) {
 }
 
 async function obtenerVentaPorCodigoComprobante(codigo) {
-    const venta = await prisma.venta.findUnique({
+    const incluirComprobante = {
+        detalles: { include: { producto: true } },
+        usuario: { select: { id: true, nombre: true, apellido: true } }
+    };
+    let venta = await prisma.venta.findUnique({
         where: { codigoComprobante: codigo },
-        include: {
-            detalles: { include: { producto: true } },
-            usuario: { select: { id: true, nombre: true, apellido: true } }
-        }
+        include: incluirComprobante
     });
     if (!venta) throw new ErrorPersonalizado("Comprobante no encontrado", 404);
+
+    if (venta.estado === "PENDIENTE" && venta.mpOrderId) {
+        let orden;
+        try {
+            orden = await mercadoPagoQrService.obtenerOrden(venta.mpOrderId);
+        } catch {
+            // El comprobante sigue disponible aunque Mercado Pago no responda momentaneamente.
+        }
+
+        if (orden && orden.status !== "created") {
+            await sincronizarOrdenQr(orden);
+            venta = await prisma.venta.findUnique({
+                where: { codigoComprobante: codigo },
+                include: incluirComprobante
+            });
+        }
+    }
+
     const { mpQrData, mpOrderId, mpOrderStatus, ...comprobante } = venta;
     return {
         ...comprobante,
@@ -354,7 +439,7 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
 }
 
 async function registrarVentaDirecta(cajeroId, datos) {
-    const venta = await registrarVenta(cajeroId, datos);
+    const venta = await registrarVenta(cajeroId, datos, "RAPIDA");
 
     if (datos.cobrar && datos.metodoPago === "MercadoPago") {
         let qr;
@@ -547,6 +632,9 @@ module.exports = {
     registrarVenta,
     registrarVentaDirecta,
     cobrarVenta,
+    marcarVentaEnPreparacion,
+    marcarVentaListaParaRetirar,
+    marcarVentaRetirada,
     cancelarVenta,
     listarVentas,
     obtenerVentaPorId,

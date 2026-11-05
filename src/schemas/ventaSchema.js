@@ -51,17 +51,43 @@ const ventaDirectaSchema = z.object({
 const cancelarVentaSchema = z.object({}).optional();
 
 const cobrarVentaSchema = z.object({
-    metodoPago: z.string().min(1, "El metodo de pago es obligatorio")
+    metodoPago: z.string().min(1, "El metodo de pago es obligatorio"),
+    efectivoRecibido: z.number().finite().optional()
+}).superRefine((datos, contexto) => {
+    if (datos.metodoPago !== "Efectivo") return;
+
+    if (datos.efectivoRecibido === undefined) {
+        contexto.addIssue({
+            code: "custom",
+            message: "El efectivo recibido es obligatorio",
+            path: ["efectivoRecibido"]
+        });
+    } else if (datos.efectivoRecibido <= 0) {
+        contexto.addIssue({
+            code: "custom",
+            message: "El efectivo recibido debe ser mayor a 0",
+            path: ["efectivoRecibido"]
+        });
+    }
 });
 
 const listarVentasQuerySchema = z.object({
     pagina: z.coerce.number().int().positive().optional(),
     limite: z.coerce.number().int().positive().optional(),
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().optional(),
     estado: z.enum(["PENDIENTE", "COBRADA", "CANCELADA"]).optional(),
     fechaDesde: z.coerce.date().optional(),
     fechaHasta: z.coerce.date().optional(),
     clienteId: z.string().uuid("El id de cliente no es valido").optional()
-}).refine(
+}).transform((datos) => ({
+    pagina: datos.pagina ?? datos.page,
+    limite: datos.limite ?? datos.limit,
+    estado: datos.estado,
+    fechaDesde: datos.fechaDesde,
+    fechaHasta: datos.fechaHasta,
+    clienteId: datos.clienteId
+})).refine(
     (filtros) => !filtros.fechaDesde || !filtros.fechaHasta || filtros.fechaDesde <= filtros.fechaHasta,
     { message: "La fecha desde no puede ser posterior a la fecha hasta" }
 );

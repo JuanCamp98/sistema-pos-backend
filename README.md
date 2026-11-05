@@ -44,20 +44,25 @@ cd pos-web-backend
 npm install
 ```
 
-4. Crear un archivo `.env` en la raíz del proyecto con las siguientes variables:
-PORT=3000 
-DATABASE_URL=tu_url_de_conexion_a_postgres 
+4. Crear un archivo `.env` en la raíz del proyecto:
+
+```env
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:55432/template1?sslmode=disable
 JWT_SECRET=una_clave_secreta_cualquiera
-
-5. Levantar la base de datos local (dejar la terminal abierta):
-
-```bash
-npx prisma dev
 ```
 
-6. En otra terminal, ejecutar el servidor:
+5. Levantar la base de datos local en una terminal y dejarla abierta:
 
 ```bash
+npx prisma dev --name pos-pocho-local --port 3010 --db-port 55432 --shadow-db-port 55433
+```
+
+6. En otra terminal, aplicar las migraciones, cargar los datos iniciales e iniciar el servidor:
+
+```bash
+npx prisma migrate deploy
+node prisma/seed.js
 npm run dev
 ```
 
@@ -68,21 +73,30 @@ npm run dev
 * **Stock**: registro de movimientos (entradas/salidas) con historial
 * **Ventas**: registro de ventas con transacción atómica (descuenta stock automáticamente) e historial de ventas
 
+## Imágenes de productos
+
+El campo opcional `imagen` almacena una URL HTTP(S) o una ruta relativa de la imagen. Los productos existentes quedan con `imagen: null`. En desarrollo, aplicar el cambio de base de datos con `npx prisma migrate dev`; en despliegues, ejecutar `npx prisma migrate deploy`. Luego regenerar el cliente de Prisma con `npx prisma generate`.
+
+El alta y la edición administrativa aceptan una imagen JPG, PNG o WebP de hasta 5 MB como archivo multipart en el campo `imagen`. El backend valida el formato, guarda el archivo en `uploads/productos/` con un nombre generado y persiste una ruta como `/uploads/productos/<id>.jpg` en el producto. Express publica los archivos bajo `/uploads`. Si una imagen se reemplaza, el archivo anterior se elimina.
+
+El directorio `uploads/` debe persistir entre reinicios y despliegues. En Docker, montar un volumen persistente en ese directorio; si el alojamiento usa almacenamiento efímero, configurar un volumen persistente antes de producción o los archivos subidos podrían perderse.
+
 ## Mercado Pago QR
 
 La venta rápida puede generar un QR dinámico en ARS. La venta permanece pendiente y solo se marca como cobrada después de consultar una order `processed` en Mercado Pago.
 
 1. En Mercado Pago Developers, crea una aplicación y usa primero el Access Token de prueba.
 2. Crea una sucursal y una caja para Código QR. Configura `MP_QR_EXTERNAL_POS_ID` con el `external_id` de esa caja.
-3. Agrega estas variables al `.env` del backend. No publiques ni compartas el Access Token.
+3. Agrega estas variables al `.env` del backend. Copia `MP_WEBHOOK_SECRET` desde la configuración de Webhooks. No publiques ni compartas las credenciales.
 
 ```env
 MP_ACCESS_TOKEN=TEST-...
 MP_QR_EXTERNAL_POS_ID=POS-001
+MP_WEBHOOK_SECRET=...
 ```
 
 4. Aplica la migración de desarrollo con `npx prisma migrate dev`.
-5. En la aplicación de Developers, configura el webhook del tópico **Orders (Mercado Pago)** para `https://TU-DOMINIO/ventas/webhook/mercadopago`. Para desarrollo local, usa un túnel HTTPS y configura su URL pública.
+5. En la aplicación de Developers, configura el evento **Order (Mercado Pago)** para `https://TU-DOMINIO/ventas/webhook/mercadopago`, copia la clave secreta al `.env` y reinicia el backend. Para desarrollo local, usa un túnel HTTPS y configura su URL pública.
 6. Prueba con credenciales y cuentas de prueba antes de cambiar al Access Token de producción.
 
 El QR dinámico vence a los 15 minutos. El webhook solo dispara la sincronización: el backend consulta la order directamente a Mercado Pago antes de modificar el estado o descontar el stock.

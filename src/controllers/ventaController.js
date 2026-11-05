@@ -39,11 +39,16 @@ async function registrarDirecta(req, res, next) {
 
 async function cobrar(req, res, next) {
     try {
-        const resultado = await ventaService.cobrarVenta(req.params.id, req.body.metodoPago);
+        const resultado = await ventaService.cobrarVenta(
+            req.params.id,
+            req.body.metodoPago,
+            req.body.efectivoRecibido
+        );
         res.status(200).json({
             mensaje: "Venta cobrada correctamente",
             venta: resultado.venta,
-            correo: resultado.correo
+            correo: resultado.correo,
+            ...(resultado.cambio !== undefined ? { cambio: resultado.cambio } : {})
         });
     } catch (error) { next(error); }
 }
@@ -58,13 +63,38 @@ async function cancelar(req, res, next) {
     } catch (error) { next(error); }
 }
 
+async function preparar(req, res, next) {
+    try {
+        const venta = await ventaService.marcarVentaEnPreparacion(req.params.id);
+        res.status(200).json({ mensaje: "La venta pasó a preparación", venta });
+    } catch (error) { next(error); }
+}
+
+async function listaParaRetirar(req, res, next) {
+    try {
+        const resultado = await ventaService.marcarVentaListaParaRetirar(req.params.id);
+        res.status(200).json({ mensaje: "La venta está lista para retirar", ...resultado });
+    } catch (error) { next(error); }
+}
+
+async function retirar(req, res, next) {
+    try {
+        const venta = await ventaService.marcarVentaRetirada(req.params.id);
+        res.status(200).json({ mensaje: "La venta fue entregada", venta });
+    } catch (error) { next(error); }
+}
+
 async function listar(req, res, next) {
     try {
         const resultadoFiltros = listarVentasQuerySchema.safeParse(req.query);
         if (!resultadoFiltros.success) {
             throw new ErrorPersonalizado("Los filtros de ventas no son validos", 400);
         }
-        const resultado = await ventaService.listarVentas(resultadoFiltros.data);
+        const filtros = { ...resultadoFiltros.data };
+        if (req.usuario && req.usuario.rol === "Cliente") {
+            filtros.clienteId = req.usuario.id;
+        }
+        const resultado = await ventaService.listarVentas(filtros);
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
@@ -72,6 +102,9 @@ async function listar(req, res, next) {
 async function obtenerPorId(req, res, next) {
     try {
         const venta = await ventaService.obtenerVentaPorId(req.params.id);
+        if (req.usuario && req.usuario.rol === "Cliente" && venta.usuarioId !== req.usuario.id) {
+            throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
+        }
         res.status(200).json({ venta: venta });
     } catch (error) { next(error); }
 }
@@ -102,6 +135,9 @@ module.exports = {
     registrarDirecta,
     cobrar,
     cancelar,
+    preparar,
+    listaParaRetirar,
+    retirar,
     listar,
     obtenerPorId,
     buscarPorComprobante,

@@ -3,3 +3,9 @@ node_modules/
 /generated/prisma
 iniciar.bat
 *.log
+
+/uploads/*
+!/uploads/productos/
+/uploads/productos/*
+!/uploads/productos/.gitkeep
+/GUIA_ESTUDIO_PROYECTO.md

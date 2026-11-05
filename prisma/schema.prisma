@@ -42,25 +42,106 @@ model Producto {
   id             String   @id @default(uuid())
   nombre         String
   descripcion    String?
+  imagen         String?
   precio         Decimal  @db.Decimal(10, 2)
   stock          Int      @default(0)
   stockReservado Int      @default(0) @map("stock_reservado")
-  categoria      String
+  categoriaId    String   @map("categoria_id")
+  tipoProductoId String   @map("tipo_producto_id")
   activo         Boolean  @default(true)
   creadoEn       DateTime @default(now()) @map("creado_en")
   actualizadoEn  DateTime @updatedAt @map("actualizado_en")
 
   detallesVenta    DetalleVenta[]
   movimientosStock MovimientoStock[]
+  promociones     PromocionProducto[]
+  categoriaRelacion Categoria @relation(fields: [categoriaId], references: [id], onDelete: Restrict)
+  tipoProducto      TipoProducto @relation(fields: [tipoProductoId], references: [id], onDelete: Restrict)
 
   @@map("productos")
+}
+
+model Categoria {
+  id          String     @id @default(uuid())
+  nombre      String     @unique
+  activo      Boolean    @default(true)
+  creadoEn    DateTime   @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  productos Producto[]
+
+  @@map("categorias")
+}
+
+model TipoProducto {
+  id          String     @id @default(uuid())
+  nombre      String     @unique
+  activo      Boolean    @default(true)
+  creadoEn    DateTime   @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  productos Producto[]
+
+  @@map("tipos_producto")
+}
+
+enum TipoDescuento {
+  PORCENTAJE
+  IMPORTE
+}
+
+model Promocion {
+  id             String        @id @default(uuid())
+  titulo         String
+  descripcion    String?
+  tipoDescuento  TipoDescuento @map("tipo_descuento")
+  valorDescuento Decimal       @map("valor_descuento") @db.Decimal(10, 2)
+  fechaInicio    DateTime      @map("fecha_inicio")
+  fechaFin       DateTime      @map("fecha_fin")
+  activo         Boolean       @default(true)
+  creadoEn       DateTime      @default(now()) @map("creado_en")
+  actualizadoEn  DateTime      @updatedAt @map("actualizado_en")
+
+  productos  PromocionProducto[]
+  categorias PromocionCategoria[]
+
+  @@map("promociones")
+}
+
+model PromocionProducto {
+  promocionId String @map("promocion_id")
+  productoId  String @map("producto_id")
+
+  promocion Promocion @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+  producto  Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  @@id([promocionId, productoId])
+  @@map("promociones_productos")
+}
+
+model PromocionCategoria {
+  promocionId String @map("promocion_id")
+  categoria   String
+
+  promocion Promocion @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+
+  @@id([promocionId, categoria])
+  @@map("promociones_categorias")
 }
 
 // Estado actual de una venta en su ciclo de vida
 enum EstadoVenta {
   PENDIENTE
   COBRADA
+  EN_PREPARACION
+  LISTA_PARA_RETIRAR
+  RETIRADA
   CANCELADA
+}
+
+enum OrigenVenta {
+  AUTOGESTION
+  RAPIDA
 }
 
 // Registro de cada venta realizada
@@ -75,6 +156,7 @@ model Venta {
   clienteEmail      String?     @map("cliente_email")
   codigoComprobante String      @unique @map("codigo_comprobante")
   estado            EstadoVenta @default(PENDIENTE)
+  origen            OrigenVenta @default(AUTOGESTION)
   metodoPago        String?     @map("metodo_pago")
   mpOrderId         String?     @unique @map("mp_order_id")
   mpOrderStatus     String?     @map("mp_order_status")

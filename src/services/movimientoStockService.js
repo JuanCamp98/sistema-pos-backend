@@ -56,7 +56,8 @@ async function listarStock(pagina, limite) {
             select: {
                 id: true,
                 nombre: true,
-                categoria: true,
+                imagen: true,
+                categoriaRelacion: { select: { nombre: true } },
                 stock: true,
                 stockReservado: true
             },
@@ -70,6 +71,7 @@ async function listarStock(pagina, limite) {
     return {
         data: productos.map((producto) => ({
             ...producto,
+            categoria: producto.categoriaRelacion.nombre,
             stockDisponible: producto.stock - producto.stockReservado
         })),
         total,

@@ -14,20 +14,20 @@ async function registrarUsuario(datos) {
         throw new Error("El rol indicado no existe");
     }
 
-    const usuarioExistenteEmail = await prisma.usuario.findUnique({
-        where: { email: email }
+    // Buscamos si existe algun usuario que coincida en DNI O Email en una sola consulta
+    const usuarioExistente = await prisma.usuario.findFirst({
+        where: {
+            OR: [
+                { email: email },
+                { dni: dni }
+            ]
+        }
     });
 
-    if (usuarioExistenteEmail) {
-        throw new Error("Ya existe un usuario con ese email");
-    }
-
-    const usuarioExistenteDni = await prisma.usuario.findUnique({
-        where: { dni: dni }
-    });
-
-    if (usuarioExistenteDni) {
-        throw new Error("Ya existe un usuario con ese DNI");
+    if (usuarioExistente) {
+        const error = new Error("Ya existe un usuario registrado con los datos ingresados");
+        error.status = 409;
+        throw error;
     }
 
     const contrasenaEncriptada = await bcrypt.hash(contrasena, 10);
