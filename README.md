@@ -79,6 +79,12 @@ Cuando una venta de autogestión pasa a `COBRADA`, el backend crea, dentro de la
 
 Los endpoints `GET /notificaciones` y `PATCH /notificaciones/:id/leida` requieren JWT y rol de personal. El listado incluye notificaciones leídas y pendientes, junto con el contador de pendientes; cada usuario solo consulta o actualiza las propias. El frontend actualiza el listado cada 30 segundos. Aplicar la migración correspondiente en cada entorno con `npx prisma migrate deploy`.
 
+## Precio mínimo promocional
+
+El piso es global y se configura en el backend mediante `PRECIO_MINIMO_PROMOCIONAL`, en pesos argentinos, con hasta dos decimales. Si no se define, se usa `$100.00`. Una promoción activa se rechaza al crearla o actualizarla si alguno de los productos activos alcanzados quedaría bajo el piso; el error informa el producto, el precio resultante y el mínimo.
+
+El cálculo usa centavos enteros, permite descuentos que dejan el precio exactamente en el mínimo y no acumula promociones: conserva la regla existente de aplicar la oferta individual más beneficiosa. Si un cambio posterior de precio deja una promoción existente bajo el piso, el catálogo informa que no puede aplicarse y el backend rechaza el checkout; también se valida al cambiar precio o categoría de un producto. El precio regular sin promoción puede ser inferior al piso. El límite se expone para mostrarlo en administración y debe configurarse en el entorno del backend. El modelo actual no implementa combos ni promociones 2x1.
+
 ## Imágenes de productos
 
 El campo opcional `imagen` almacena una URL HTTP(S) o una ruta relativa de la imagen. Los productos existentes quedan con `imagen: null`. En desarrollo, aplicar el cambio de base de datos con `npx prisma migrate dev`; en despliegues, ejecutar `npx prisma migrate deploy`. Luego regenerar el cliente de Prisma con `npx prisma generate`.

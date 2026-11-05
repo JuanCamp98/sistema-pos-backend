@@ -7,7 +7,10 @@ const camposPromocionSchema = z.object({
     titulo: z.string().trim().min(1, "El titulo es obligatorio").max(150),
     descripcion: z.string().trim().max(1000).nullable().optional(),
     tipoDescuento: z.enum(["PORCENTAJE", "IMPORTE"]),
-    valorDescuento: z.coerce.number().positive("El descuento debe ser mayor a cero"),
+    valorDescuento: z.coerce.number()
+        .positive("El descuento debe ser mayor a cero")
+        .max(99999999.99, "El descuento supera el máximo permitido")
+        .refine((valor) => Math.abs(valor * 100 - Math.round(valor * 100)) < 1e-8, "El descuento admite como máximo dos decimales"),
     fechaInicio: z.coerce.date(),
     fechaFin: z.coerce.date(),
     activo: z.boolean().default(true),
