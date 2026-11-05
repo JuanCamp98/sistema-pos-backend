@@ -2,9 +2,33 @@ const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
 const incluirRelaciones = {
-    productos: { select: { producto: { select: { id: true, nombre: true, categoria: true } } } },
+    productos: {
+        select: {
+            producto: {
+                select: {
+                    id: true,
+                    nombre: true,
+                    imagen: true,
+                    categoriaRelacion: { select: { nombre: true } }
+                }
+            }
+        }
+    },
     categorias: { select: { categoria: true } }
 };
+
+function presentarPromocion(promocion) {
+    return {
+        ...promocion,
+        productos: promocion.productos?.map(function (item) {
+            const { categoriaRelacion, ...producto } = item.producto;
+            return {
+                ...item,
+                producto: { ...producto, categoria: categoriaRelacion.nombre }
+            };
+        })
+    };
+}
 
 function datosBase(datos) {
     return {
@@ -33,17 +57,19 @@ async function relaciones(datos) {
 }
 
 async function listarPromociones() {
-    return prisma.promocion.findMany({ orderBy: { fechaInicio: "desc" }, include: incluirRelaciones });
+    const promociones = await prisma.promocion.findMany({ orderBy: { fechaInicio: "desc" }, include: incluirRelaciones });
+    return promociones.map(presentarPromocion);
 }
 
 async function obtenerPromocion(id) {
     const promocion = await prisma.promocion.findUnique({ where: { id }, include: incluirRelaciones });
     if (!promocion) throw new ErrorPersonalizado("Promocion no encontrada", 404);
-    return promocion;
+    return presentarPromocion(promocion);
 }
 
 async function crearPromocion(datos) {
-    return prisma.promocion.create({ data: { ...datosBase(datos), ...(await relaciones(datos)) }, include: incluirRelaciones });
+    const promocion = await prisma.promocion.create({ data: { ...datosBase(datos), ...(await relaciones(datos)) }, include: incluirRelaciones });
+    return presentarPromocion(promocion);
 }
 
 async function actualizarPromocion(id, datos) {
@@ -59,7 +85,7 @@ async function actualizarPromocion(id, datos) {
             await tx.promocionProducto.deleteMany({ where: { promocionId: id } });
             await tx.promocionCategoria.deleteMany({ where: { promocionId: id } });
         }
-        return tx.promocion.update({
+        const promocion = await tx.promocion.update({
             where: { id },
             data: {
                 ...datosBase({ ...actual, ...datos, fechaInicio, fechaFin }),
@@ -68,6 +94,7 @@ async function actualizarPromocion(id, datos) {
             },
             include: incluirRelaciones
         });
+        return presentarPromocion(promocion);
     });
 }
 
@@ -78,7 +105,7 @@ async function eliminarPromocion(id) {
 
 async function listarPromocionesVigentes() {
     const ahora = new Date();
-    return prisma.promocion.findMany({
+    const promociones = await prisma.promocion.findMany({
         where: {
             activo: true,
             fechaInicio: { lte: ahora },
@@ -96,6 +123,7 @@ async function listarPromocionesVigentes() {
             ...incluirRelaciones
         }
     });
+    return promociones.map(presentarPromocion);
 }
 
 async function calcularPrecioPromocional(db, producto) {

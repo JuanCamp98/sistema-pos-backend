@@ -73,6 +73,12 @@ npm run dev
 * **Stock**: registro de movimientos (entradas/salidas) con historial
 * **Ventas**: registro de ventas con transacción atómica (descuenta stock automáticamente) e historial de ventas
 
+## Notificaciones internas
+
+Cuando una venta de autogestión pasa a `COBRADA`, el backend crea, dentro de la misma transacción, una notificación para cada usuario con rol `Administrador` o `Cajero`, para que el personal pueda comenzar a prepararla. La restricción única por venta y destinatario evita duplicados. Las ventas rápidas y las ventas canceladas no generan notificaciones.
+
+Los endpoints `GET /notificaciones` y `PATCH /notificaciones/:id/leida` requieren JWT y rol de personal. El listado incluye notificaciones leídas y pendientes, junto con el contador de pendientes; cada usuario solo consulta o actualiza las propias. El frontend actualiza el listado cada 30 segundos. Aplicar la migración correspondiente en cada entorno con `npx prisma migrate deploy`.
+
 ## Imágenes de productos
 
 El campo opcional `imagen` almacena una URL HTTP(S) o una ruta relativa de la imagen. Los productos existentes quedan con `imagen: null`. En desarrollo, aplicar el cambio de base de datos con `npx prisma migrate dev`; en despliegues, ejecutar `npx prisma migrate deploy`. Luego regenerar el cliente de Prisma con `npx prisma generate`.
@@ -103,4 +109,4 @@ El QR dinámico vence a los 15 minutos. El webhook solo dispara la sincronizaci�
 
 ## Estado Actual
 
-Backend con los módulos principales implementados y probados. Pendiente: integración con el frontend.
+Backend con los módulos principales implementados e integrado con el frontend.

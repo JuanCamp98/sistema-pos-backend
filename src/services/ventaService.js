@@ -15,6 +15,27 @@ function generarCodigoComprobante() {
     return `V-${anio}${mes}${dia}-${random}`;
 }
 
+async function notificarCompraListaParaPreparar(tx, venta) {
+    if (venta.origen !== "AUTOGESTION") return;
+
+    const destinatarios = await tx.usuario.findMany({
+        where: { rol: { nombre: { in: ["Administrador", "Cajero"] } } },
+        select: { id: true }
+    });
+    if (destinatarios.length === 0) return;
+
+    await tx.notificacion.createMany({
+        data: destinatarios.map(function (destinatario) {
+            return {
+                usuarioId: destinatario.id,
+                ventaId: venta.id,
+                mensaje: "La compra " + venta.codigoComprobante + " está pagada y lista para comenzar a preparar."
+            };
+        }),
+        skipDuplicates: true
+    });
+}
+
 async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
     const { items, cliente, metodoPago } = datos;
 
@@ -226,6 +247,7 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
             }
         });
 
+        await notificarCompraListaParaPreparar(tx, ventaCobrada);
         return ventaCobrada;
     });
 
@@ -245,22 +267,37 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
 }
 
 async function cambiarEstadoRetiro(ventaId, estadoNuevo, estadosPermitidos) {
-    const venta = await prisma.venta.findUnique({ where: { id: ventaId } });
-    if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
-    if (venta.origen !== "AUTOGESTION") {
-        throw new ErrorPersonalizado("Las ventas rápidas se entregan en el momento y no requieren preparación para retiro", 400);
-    }
-    if (!estadosPermitidos.includes(venta.estado)) {
-        throw new ErrorPersonalizado("La venta debe estar en " + estadosPermitidos.join(" o ") + " para avanzar a " + estadoNuevo, 400);
-    }
-
-    return prisma.venta.update({
-        where: { id: ventaId },
-        data: { estado: estadoNuevo },
-        include: {
-            detalles: { include: { producto: { select: { nombre: true } } } },
-            usuario: { select: { email: true } }
+    return prisma.$transaction(async (tx) => {
+        const venta = await tx.venta.findUnique({ where: { id: ventaId } });
+        if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+        if (venta.origen !== "AUTOGESTION") {
+            throw new ErrorPersonalizado("Las ventas rápidas se entregan en el momento y no requieren preparación para retiro", 400);
         }
+        if (!estadosPermitidos.includes(venta.estado)) {
+            throw new ErrorPersonalizado("La venta debe estar en " + estadosPermitidos.join(" o ") + " para avanzar a " + estadoNuevo, 400);
+        }
+
+        const actualizacion = await tx.venta.updateMany({
+            where: {
+                id: ventaId,
+                origen: "AUTOGESTION",
+                estado: venta.estado
+            },
+            data: { estado: estadoNuevo }
+        });
+        if (actualizacion.count !== 1) {
+            throw new ErrorPersonalizado("La venta cambió mientras se procesaba la operación. Actualizá e intentá nuevamente.", 409);
+        }
+
+        const ventaActualizada = await tx.venta.findUnique({
+            where: { id: ventaId },
+            include: {
+                detalles: { include: { producto: { select: { nombre: true } } } },
+                usuario: { select: { email: true } }
+            }
+        });
+
+        return ventaActualizada;
     });
 }
 
@@ -573,6 +610,7 @@ async function sincronizarOrdenQr(orden) {
                     usuario: { select: { email: true } }
                 }
             });
+            await notificarCompraListaParaPreparar(tx, ventaCobrada);
             return { venta: ventaCobrada, nueva: true };
         });
 
