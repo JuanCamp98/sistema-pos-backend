@@ -44,7 +44,7 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
     }
 
     const resultado = await prisma.$transaction(async (tx) => {
-        let total = 0;
+        let totalCentavos = 0;
         const detalles = [];
 
         for (const item of items) {
@@ -69,14 +69,18 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
                 ...producto,
                 categoria: (await tx.categoria.findUnique({ where: { id: producto.categoriaId }, select: { nombre: true } })).nombre
             });
-            const subtotal = precio.precioFinal * item.cantidad;
-            total += subtotal;
+            if (precio.promocionNoAplicable) {
+                throw new ErrorPersonalizado(precio.promocionNoAplicable.mensaje, 409);
+            }
+            const precioUnitarioCentavos = Math.round(precio.precioFinal * 100);
+            const subtotalCentavos = precioUnitarioCentavos * item.cantidad;
+            totalCentavos += subtotalCentavos;
 
             detalles.push({
                 productoId: producto.id,
                 cantidad: item.cantidad,
-                precioUnitario: precio.precioFinal,
-                subtotal: subtotal
+                precioUnitario: precioUnitarioCentavos / 100,
+                subtotal: subtotalCentavos / 100
             });
         }
 
@@ -91,7 +95,7 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
                 estado: "PENDIENTE",
                 origen: origen,
                 metodoPago: metodoPago || null,
-                total: total,
+                total: totalCentavos / 100,
                 detalles: { create: detalles }
             },
             include: {

@@ -1,7 +1,7 @@
 const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const { calcularPaginacion } = require("../utils/paginacion");
-const { calcularPrecioPromocional } = require("./promocionService");
+const { calcularPrecioPromocional, validarProductoContraPromociones } = require("./promocionService");
 
 const clasificacion = {
     categoriaRelacion: { select: { id: true, nombre: true, activo: true } },
@@ -26,6 +26,8 @@ async function crearProducto(datos) {
     const { nombre, descripcion, imagen, precio, stock, categoriaId, tipoProductoId } = datos;
     if (await prisma.producto.findFirst({ where: { nombre, activo: true } })) throw new ErrorPersonalizado("Ya existe un producto activo con ese nombre", 409);
     await validarClasificacion(categoriaId, tipoProductoId);
+    const categoria = await prisma.categoria.findUnique({ where: { id: categoriaId }, select: { nombre: true } });
+    await validarProductoContraPromociones({ nombre, precio, categoria: categoria.nombre });
     return presentarConPrecio(prisma, await prisma.producto.create({ data: { nombre, descripcion, imagen, precio, stock, categoriaId, tipoProductoId }, include: clasificacion }));
 }
 
@@ -51,6 +53,16 @@ async function actualizarProducto(id, datos) {
     if (!producto || !producto.activo) throw new ErrorPersonalizado("Producto no encontrado", 404);
     if (datos.nombre && datos.nombre !== producto.nombre && await prisma.producto.findFirst({ where: { nombre: datos.nombre, activo: true, NOT: { id } } })) throw new ErrorPersonalizado("Ya existe un producto activo con ese nombre", 409);
     if (datos.categoriaId || datos.tipoProductoId) await validarClasificacion(datos.categoriaId || producto.categoriaId, datos.tipoProductoId || producto.tipoProductoId);
+    const categoria = await prisma.categoria.findUnique({
+        where: { id: datos.categoriaId || producto.categoriaId },
+        select: { nombre: true }
+    });
+    await validarProductoContraPromociones({
+        id: producto.id,
+        nombre: datos.nombre || producto.nombre,
+        precio: datos.precio ?? producto.precio,
+        categoria: categoria.nombre
+    });
     return presentarConPrecio(prisma, await prisma.producto.update({ where: { id }, data: datos, include: clasificacion }));
 }
 
