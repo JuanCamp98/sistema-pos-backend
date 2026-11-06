@@ -1,6 +1,13 @@
 const ventaService = require("../services/ventaService");
+const comprobantePdfService = require("../services/comprobantePdfService");
 const { listarVentasQuerySchema } = require("../schemas/ventaSchema");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
+
+function verificarAccesoVenta(usuario, venta) {
+    if (usuario?.rol === "Cliente" && venta.usuarioId !== usuario.id) {
+        throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
+    }
+}
 
 async function registrar(req, res, next) {
     try {
@@ -102,10 +109,25 @@ async function listar(req, res, next) {
 async function obtenerPorId(req, res, next) {
     try {
         const venta = await ventaService.obtenerVentaPorId(req.params.id);
-        if (req.usuario && req.usuario.rol === "Cliente" && venta.usuarioId !== req.usuario.id) {
-            throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
-        }
+        verificarAccesoVenta(req.usuario, venta);
         res.status(200).json({ venta: venta });
+    } catch (error) { next(error); }
+}
+
+async function descargarComprobantePdf(req, res, next) {
+    try {
+        const venta = await ventaService.obtenerVentaPorId(req.params.id);
+        verificarAccesoVenta(req.usuario, venta);
+        const pdf = await comprobantePdfService.generarComprobantePdf(venta);
+        const codigoSeguro = String(venta.codigoComprobante || "compra").replace(/[^a-zA-Z0-9_-]/g, "-");
+
+        res.set({
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="comprobante-compra-${codigoSeguro}.pdf"`,
+            "Content-Length": pdf.length,
+            "Cache-Control": "private, no-store"
+        });
+        res.status(200).send(pdf);
     } catch (error) { next(error); }
 }
 
@@ -140,6 +162,7 @@ module.exports = {
     retirar,
     listar,
     obtenerPorId,
+    descargarComprobantePdf,
     buscarPorComprobante,
     consultarEstadoQr,
     webhookMercadoPago
