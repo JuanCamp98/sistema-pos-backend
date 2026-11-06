@@ -5,6 +5,20 @@ const http = require("node:http");
 const jwt = require("jsonwebtoken");
 const app = require("../src/app");
 const prisma = require("../src/config/prisma");
+const comprobantePdfService = require("../src/services/comprobantePdfService");
+
+function extraerBloquesTextoPdf(pdf) {
+    const contenido = pdf.toString("latin1");
+    return Array.from(contenido.matchAll(/BT([\s\S]*?)ET/g), function (coincidencia) {
+        return Array.from(coincidencia[1].matchAll(/<([a-f0-9]+)>/gi), function (texto) {
+            return Buffer.from(texto[1], "hex").toString("latin1");
+        }).join("").trim();
+    });
+}
+
+function extraerTextoPdf(pdf) {
+    return extraerBloquesTextoPdf(pdf).join("");
+}
 
 describe("TASK-012: Historial de compras del cliente", () => {
     let server;
@@ -17,6 +31,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
     let tokenClienteA;
     let tokenClienteB;
     let tokenCajero;
+    let tokenAdministrador;
     let ventaClienteA;
     let ventaClienteB;
 
@@ -99,6 +114,11 @@ describe("TASK-012: Historial de compras del cliente", () => {
 
         tokenCajero = jwt.sign(
             { id: "cajero-uuid", rol: "Cajero" },
+            process.env.JWT_SECRET,
+            { expiresIn: "1h" }
+        );
+        tokenAdministrador = jwt.sign(
+            { id: "administrador-uuid", rol: "Administrador" },
             process.env.JWT_SECRET,
             { expiresIn: "1h" }
         );
@@ -258,7 +278,127 @@ describe("TASK-012: Historial de compras del cliente", () => {
         assert.strictEqual(data.venta.detalles[0].producto.nombre, productoTest.nombre);
     });
 
-    test("7. Cliente sin compras recibe lista vacía", async () => {
+    test("7. El cliente descarga un PDF con los datos históricos de su compra", async () => {
+        const productoAdicional = await prisma.producto.create({
+            data: {
+                nombre: "Producto adicional comprobante",
+                precio: 7000,
+                stock: 10,
+                categoriaId: categoriaTest.id,
+                tipoProductoId: tipoProductoTest.id,
+                activo: true
+            }
+        });
+        const ventaPdf = await prisma.venta.create({
+            data: {
+                usuarioId: clienteA.id,
+                clienteNombre: clienteA.nombre,
+                codigoComprobante: `V-TEST-PDF-${Date.now()}`,
+                estado: "COBRADA",
+                total: 2726.75,
+                detalles: {
+                    create: [
+                        { productoId: productoTest.id, cantidad: 2, precioUnitario: 1250.50, subtotal: 2501.00 },
+                        { productoId: productoAdicional.id, cantidad: 3, precioUnitario: 75.25, subtotal: 225.75 }
+                    ]
+                }
+            }
+        });
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/${ventaPdf.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${tokenClienteA}` }
+            });
+            assert.strictEqual(res.status, 200);
+            assert.match(res.headers.get("content-type"), /application\/pdf/);
+            assert.match(res.headers.get("content-disposition"), /comprobante-compra-V-TEST-PDF-/);
+
+            const pdf = Buffer.from(await res.arrayBuffer());
+            const pdfBytes = pdf.toString("latin1");
+            const bloquesTexto = extraerBloquesTextoPdf(pdf);
+            const contenido = extraerTextoPdf(pdf);
+            assert.ok(pdfBytes.startsWith("%PDF-"));
+            assert.ok(pdfBytes.endsWith("%%EOF\n"));
+            assert.ok(contenido.includes(productoTest.nombre));
+            assert.ok(contenido.includes("Producto adicional comprobante"));
+            assert.ok(bloquesTexto.includes("2"));
+            assert.ok(bloquesTexto.includes("3"));
+            assert.ok(contenido.includes("2.501,00"));
+            assert.ok(contenido.includes("75,25"));
+            assert.ok(contenido.includes("2.726,75"));
+            assert.ok(contenido.includes("Descuentos: no registrados por separado"));
+            assert.ok(contenido.includes("COBRADA"));
+        } finally {
+            await prisma.detalleVenta.deleteMany({ where: { ventaId: ventaPdf.id } });
+            await prisma.venta.delete({ where: { id: ventaPdf.id } });
+            await prisma.producto.delete({ where: { id: productoAdicional.id } });
+        }
+    });
+
+    test("8. Rechaza descargas sin sesión y de compras de otras personas", async () => {
+        const sinSesion = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}/comprobante.pdf`);
+        assert.strictEqual(sinSesion.status, 401);
+
+        const res = await fetch(`${baseUrl}/ventas/${ventaClienteB.id}/comprobante.pdf`, {
+            headers: { Authorization: `Bearer ${tokenClienteA}` }
+        });
+        assert.strictEqual(res.status, 403);
+    });
+
+    test("9. Cajero y administrador pueden descargar comprobantes", async () => {
+        for (const token of [tokenCajero, tokenAdministrador]) {
+            const res = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            assert.strictEqual(res.status, 200);
+            const pdf = Buffer.from(await res.arrayBuffer());
+            assert.strictEqual(pdf.subarray(0, 5).toString(), "%PDF-");
+        }
+    });
+
+    test("10. Un comprobante sin productos o con datos opcionales ausentes genera un PDF válido", async () => {
+        const ventaSinDetalles = await prisma.venta.create({
+            data: {
+                codigoComprobante: `V-TEST-VACIA-${Date.now()}`,
+                total: 0,
+                usuarioId: clienteA.id,
+                estado: "PENDIENTE"
+            }
+        });
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/${ventaSinDetalles.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${tokenClienteA}` }
+            });
+            assert.strictEqual(res.status, 200);
+            const pdf = Buffer.from(await res.arrayBuffer());
+            const contenido = extraerTextoPdf(pdf);
+            assert.strictEqual(pdf.subarray(0, 5).toString(), "%PDF-");
+            assert.ok(contenido.replace(/\s+/g, "").includes("Nohayproductosregistradosparaestacompra."));
+            assert.ok(contenido.includes("Consumidor final"));
+        } finally {
+            await prisma.venta.delete({ where: { id: ventaSinDetalles.id } });
+        }
+    });
+
+    test("11. Informa un error del generador sin devolver un PDF inválido", async () => {
+        const generadorOriginal = comprobantePdfService.generarComprobantePdf;
+        comprobantePdfService.generarComprobantePdf = async function () {
+            throw new Error("Fallo de prueba en la generación");
+        };
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${tokenClienteA}` }
+            });
+            assert.strictEqual(res.status, 500);
+            assert.match((await res.json()).mensaje, /error en el servidor/i);
+        } finally {
+            comprobantePdfService.generarComprobantePdf = generadorOriginal;
+        }
+    });
+
+    test("12. Cliente sin compras recibe lista vacía", async () => {
         const rolCliente = await prisma.rol.findUnique({ where: { nombre: "Cliente" } });
         const uniqueSuffix2 = (Date.now() + 1).toString().slice(-6);
         const clienteSinCompras = await prisma.usuario.create({

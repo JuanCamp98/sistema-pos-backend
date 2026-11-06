@@ -63,6 +63,14 @@ router.get(
     ventaController.consultarEstadoQr
 );
 
+// GET /ventas/:id/comprobante.pdf: descarga autenticada con las mismas reglas de acceso al detalle.
+router.get(
+    "/:id/comprobante.pdf",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador", "Cliente"]),
+    ventaController.descargarComprobantePdf
+);
+
 // GET /ventas/:id: Cajero, Administrador o Cliente autenticado (solo su propia compra).
 router.get(
     "/:id",
