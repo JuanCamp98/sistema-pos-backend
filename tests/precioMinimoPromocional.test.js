@@ -140,6 +140,11 @@ describe("Precio mínimo promocional", () => {
     test("el checkout descarta los precios manipulados y solo acepta producto y cantidad", () => {
         const resultado = registrarVentaSchema.safeParse({
             items: [{ productoId: "00000000-0000-4000-8000-000000000001", cantidad: 1, precio: 0, precioUnitario: 0 }],
+            retiro: {
+                fecha: "2026-11-09",
+                horaInicio: "09:00",
+                horaFin: "10:00"
+            },
             precio: 0,
             total: 0
         });

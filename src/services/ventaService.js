@@ -5,6 +5,7 @@ const mailService = require("./mailService");
 const mercadoPagoQrService = require("./mercadoPagoQrService");
 const { calcularPaginacion, calcularTotalPaginas } = require("../utils/paginacion");
 const { calcularPrecioPromocional } = require("./promocionService");
+const { validarHorarioRetiro } = require("./retiroService");
 
 function generarCodigoComprobante() {
     const fecha = new Date();
@@ -37,13 +38,19 @@ async function notificarCompraListaParaPreparar(tx, venta) {
 }
 
 async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
-    const { items, cliente, metodoPago } = datos;
+    const { items, cliente, metodoPago, retiro } = datos;
 
     if (!items || items.length === 0) {
         throw new ErrorPersonalizado("La venta debe tener al menos un producto", 400);
     }
+    if (origen === "AUTOGESTION" && !retiro) {
+        throw new ErrorPersonalizado("La fecha y el horario de retiro son obligatorios", 400);
+    }
 
     const resultado = await prisma.$transaction(async (tx) => {
+        const fechaRetiro = origen === "AUTOGESTION"
+            ? await validarHorarioRetiro(tx, retiro)
+            : null;
         let totalCentavos = 0;
         const detalles = [];
 
@@ -87,6 +94,11 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
         const venta = await tx.venta.create({
             data: {
                 usuarioId: usuarioId || null,
+                ...(fechaRetiro && {
+                    fechaRetiro,
+                    horarioRetiroInicio: retiro.horaInicio,
+                    horarioRetiroFin: retiro.horaFin
+                }),
                 clienteNombre: cliente?.nombre || null,
                 clienteApellido: cliente?.apellido || null,
                 clienteDni: cliente?.dni || null,

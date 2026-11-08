@@ -149,6 +149,9 @@ enum OrigenVenta {
 model Venta {
   id                String      @id @default(uuid())
   fecha             DateTime    @default(now())
+  fechaRetiro       DateTime?   @db.Date @map("fecha_retiro")
+  horarioRetiroInicio String?   @map("horario_retiro_inicio") @db.VarChar(5)
+  horarioRetiroFin  String?     @map("horario_retiro_fin") @db.VarChar(5)
   total             Decimal     @db.Decimal(10, 2)
   usuarioId         String?     @map("usuario_id")
   clienteNombre     String?     @map("cliente_nombre")
@@ -170,6 +173,14 @@ model Venta {
   notificaciones Notificacion[]
 
   @@map("ventas")
+}
+
+model ConfiguracionRetiro {
+  id              Int      @id @default(1)
+  configuracion   Json
+  actualizadoEn   DateTime @updatedAt @map("actualizado_en")
+
+  @@map("configuracion_retiro")
 }
 
 model Notificacion {
