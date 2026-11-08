@@ -11,6 +11,7 @@ const ventaRoutes = require("./routes/ventaRoutes");
 const promocionRoutes = require("./routes/promocionRoutes");
 const clasificacionRoutes = require("./routes/clasificacionRoutes");
 const notificacionRoutes = require("./routes/notificacionRoutes");
+const retiroRoutes = require("./routes/retiroRoutes");
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use("/usuarios", usuarioRoutes);
 app.use("/productos", productoRoutes);
 app.use("/stock", movimientoStockRoutes);
 app.use("/ventas", ventaRoutes);
+app.use("/retiros", retiroRoutes);
 app.use("/notificaciones", notificacionRoutes);
 app.use("/promociones", promocionRoutes);
 app.use("/categorias", clasificacionRoutes("categoria"));

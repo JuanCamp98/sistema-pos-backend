@@ -27,6 +27,18 @@ function formatearFecha(fecha) {
     });
 }
 
+function formatearFechaRetiro(fecha) {
+    if (!fecha) return null;
+    const fechaUtc = new Date(`${fecha}T00:00:00.000Z`);
+    if (Number.isNaN(fechaUtc.getTime())) return null;
+    return fechaUtc.toLocaleDateString("es-AR", {
+        timeZone: "UTC",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+    });
+}
+
 function agregarEncabezadoTabla(documento) {
     const columnas = documento.page.width - MARGEN * 2;
     const producto = columnas * 0.46;
@@ -72,6 +84,10 @@ function generarComprobantePdf(venta) {
             const datosCompra = [
                 ["Código", textoDisponible(venta.codigoComprobante)],
                 ["Fecha y hora", formatearFecha(venta.fecha || venta.creadoEn)],
+                ...(venta.fechaRetiro ? [
+                    ["Fecha de retiro", formatearFechaRetiro(venta.fechaRetiro)],
+                    ["Horario de retiro", `${venta.horarioRetiroInicio} a ${venta.horarioRetiroFin}`]
+                ] : []),
                 ["Cliente", cliente || "Consumidor final"],
                 ["Estado", textoDisponible(venta.estado)]
             ];

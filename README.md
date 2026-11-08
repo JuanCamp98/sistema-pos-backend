@@ -79,6 +79,14 @@ Cuando una venta de autogestión pasa a `COBRADA`, el backend crea, dentro de la
 
 Los endpoints `GET /notificaciones` y `PATCH /notificaciones/:id/leida` requieren JWT y rol de personal. El listado incluye notificaciones leídas y pendientes, junto con el contador de pendientes; cada usuario solo consulta o actualiza las propias. El frontend actualiza el listado cada 30 segundos. Aplicar la migración correspondiente en cada entorno con `npx prisma migrate deploy`.
 
+## Fecha y horario de retiro
+
+La sección **Horarios de retiro** de administración permite definir los días de atención, apertura, cierre, duración de cada turno y excepciones de fechas cerradas o con horario especial. No hay un horario inicial supuesto: hasta que se guarde una configuración, el checkout no ofrece fechas.
+
+El checkout consulta `GET /retiros/disponibilidad?dias=60`; la venta requiere un turno y el backend lo recalcula dentro de la transacción antes de guardarlo. `fecha_retiro` se almacena como fecha SQL (`DATE`) y el horario como cadenas `HH:mm`, evitando conversiones UTC sobre fechas u horas locales. Las ventas anteriores conservan sus datos y quedan sin turno. Los turnos no tienen cupos ni reservas limitadas; al cancelar una compra no se requiere liberar capacidad.
+
+La zona horaria usada para decidir la fecha actual y filtrar turnos que ya comenzaron se configura con `ZONA_HORARIA_NEGOCIO` (por defecto `America/Argentina/Buenos_Aires`). Aplicar la migración con `npx prisma migrate deploy` y regenerar Prisma con `npx prisma generate`. La configuración se gestiona desde el panel, no es necesario modificar datos de ventas existentes.
+
 ## Precio mínimo promocional
 
 El piso es global y se configura en el backend mediante `PRECIO_MINIMO_PROMOCIONAL`, en pesos argentinos, con hasta dos decimales. Si no se define, se usa `$100.00`. Una promoción activa se rechaza al crearla o actualizarla si alguno de los productos activos alcanzados quedaría bajo el piso; el error informa el producto, el precio resultante y el mínimo.

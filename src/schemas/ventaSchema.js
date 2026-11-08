@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { retiroVentaSchema } = require("./retiroSchema");
 
 const clienteSchema = z.object({
     nombre: z.string().min(1, "El nombre del cliente es obligatorio"),
@@ -19,7 +20,8 @@ const registrarVentaSchema = z.object({
         })
     ).min(1, "La venta debe tener al menos un producto"),
     cliente: clienteSchema.optional(),
-    metodoPago: z.string().min(1).optional()
+    metodoPago: z.string().min(1).optional(),
+    retiro: retiroVentaSchema
 });
 
 const clienteVentaDirectaSchema = z.object({
