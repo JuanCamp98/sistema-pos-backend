@@ -107,19 +107,17 @@ La venta rápida puede generar un QR dinámico en ARS. La venta permanece pendie
 
 1. En Mercado Pago Developers, crea una aplicación y usa primero el Access Token de prueba.
 2. Crea una sucursal y una caja para Código QR. Configura `MP_QR_EXTERNAL_POS_ID` con el `external_id` de esa caja.
-3. Agrega estas variables al `.env` del backend. Copia `MP_WEBHOOK_SECRET` desde la configuración de Webhooks. No publiques ni compartas las credenciales.
+3. Agrega estas variables al `.env` del backend. No publiques ni compartas las credenciales.
 
 ```env
 MP_ACCESS_TOKEN=TEST-...
 MP_QR_EXTERNAL_POS_ID=POS-001
-MP_WEBHOOK_SECRET=...
 ```
 
-4. Aplica la migración de desarrollo con `npx prisma migrate dev`.
-5. En la aplicación de Developers, configura el evento **Order (Mercado Pago)** para `https://TU-DOMINIO/ventas/webhook/mercadopago`, copia la clave secreta al `.env` y reinicia el backend. Para desarrollo local, usa un túnel HTTPS y configura su URL pública.
-6. Prueba con credenciales y cuentas de prueba antes de cambiar al Access Token de producción.
-
-El QR dinámico vence a los 15 minutos. El webhook solo dispara la sincronización: el backend consulta la order directamente a Mercado Pago antes de modificar el estado o descontar el stock.
+4. Aplica las migraciones con `npx prisma migrate deploy` y regenera Prisma con `npx prisma generate`.
+5. En la aplicación de Developers, configura notificaciones para **Order (Mercado Pago)** con la URL `https://TU-DOMINIO/ventas/webhook/mercadopago`. Para desarrollo local, usa un túnel HTTPS y configura su URL pública.
+6. El webhook QR se usa como aviso y no como confirmación de pago: la API no requiere una firma HMAC para esta notificación QR. El backend acepta solo identificadores de orden con formato válido, busca una orden vinculada a una venta local y consulta la orden con el Access Token antes de actualizar la venta. No se actualizan ventas a partir del contenido enviado por el webhook.
+7. El QR dinámico vence a los 15 minutos. El cliente y la caja vuelven a consultar la orden cada 10 segundos como respaldo si la notificación se demora o no llega. Solo `processed` confirma el pago; `expired` y `canceled` cancelan la venta pendiente, mientras que `refunded` queda registrado como reembolsada. `status_detail` también se conserva para diagnóstico.
 
 ## Estado Actual
 

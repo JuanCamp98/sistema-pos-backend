@@ -10,6 +10,7 @@ const {
     ventaDirectaSchema,
     cobrarVentaSchema,
     cancelarVentaSchema,
+    renombrarVentaSchema,
     listarVentasQuerySchema
 } = require("../schemas/ventaSchema");
 const router = express.Router();
@@ -69,6 +70,15 @@ router.get(
     verificarToken,
     verificarRol(["Cajero", "Administrador", "Cliente"]),
     ventaController.descargarComprobantePdf
+);
+
+// PATCH /ventas/:id/nombre: el cliente solo puede renombrar una compra propia.
+router.patch(
+    "/:id/nombre",
+    verificarToken,
+    verificarRol(["Cliente"]),
+    validar(renombrarVentaSchema),
+    ventaController.renombrar
 );
 
 // GET /ventas/:id: Cajero, Administrador o Cliente autenticado (solo su propia compra).

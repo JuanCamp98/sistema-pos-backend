@@ -15,4 +15,6 @@ router.post(
 
 router.post("/login", validar(loginSchema), usuarioController.iniciarSesion);
 
+router.get("/perfil", verificarToken, usuarioController.obtenerPerfil);
+
 module.exports = router;

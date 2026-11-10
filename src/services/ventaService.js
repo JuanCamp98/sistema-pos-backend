@@ -37,8 +37,13 @@ async function notificarCompraListaParaPreparar(tx, venta) {
     });
 }
 
+function normalizarNombrePersonalizado(nombre) {
+    if (typeof nombre !== "string") return nombre;
+    return nombre.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
-    const { items, cliente, metodoPago, retiro } = datos;
+    const { items, cliente, metodoPago, retiro, nombrePersonalizado } = datos;
 
     if (!items || items.length === 0) {
         throw new ErrorPersonalizado("La venta debe tener al menos un producto", 400);
@@ -91,6 +96,8 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
             });
         }
 
+        const nombrePersonalizadoNormalizado = normalizarNombrePersonalizado(nombrePersonalizado);
+
         const venta = await tx.venta.create({
             data: {
                 usuarioId: usuarioId || null,
@@ -103,6 +110,7 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
                 clienteApellido: cliente?.apellido || null,
                 clienteDni: cliente?.dni || null,
                 clienteEmail: cliente?.email || null,
+                nombrePersonalizado: nombrePersonalizadoNormalizado || null,
                 codigoComprobante: generarCodigoComprobante(),
                 estado: "PENDIENTE",
                 origen: origen,
@@ -151,6 +159,7 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
                 data: {
                     mpOrderId: qr.orderId,
                     mpOrderStatus: qr.status,
+                    mpOrderStatusDetail: qr.statusDetail,
                     mpQrData: qr.qrData
                 },
                 include: {
@@ -171,7 +180,8 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
                     orderId: qr.orderId,
                     qrData: qr.qrData,
                     expiresAt: qr.expiresAt,
-                    estado: qr.status
+                    estado: qr.status,
+                    detalleEstado: qr.statusDetail
                 }
             };
         } catch (error) {
@@ -350,18 +360,26 @@ async function cancelarVenta(ventaId) {
         }
 
         if (orden.status === "created") {
-            await mercadoPagoQrService.cancelarOrden(venta.mpOrderId, venta.id);
+            const ordenCancelada = await mercadoPagoQrService.cancelarOrden(venta.mpOrderId, venta.id);
+            if (ordenCancelada.status === "processed") {
+                await sincronizarOrdenQr(ordenCancelada);
+                throw new ErrorPersonalizado("El pago ya fue acreditado y no se puede cancelar", 409);
+            }
+            if (!["canceled", "expired"].includes(ordenCancelada.status)) {
+                throw new ErrorPersonalizado("Mercado Pago no confirmó la cancelación de la orden", 409);
+            }
+            return cancelarVentaLocal(ventaId, ordenCancelada.status, ordenCancelada.status_detail);
         } else if (orden.status !== "expired" && orden.status !== "canceled") {
             throw new ErrorPersonalizado("No se puede cancelar la orden en su estado actual", 409);
         }
 
-        return cancelarVentaLocal(ventaId, orden.status === "expired" ? "expired" : "canceled");
+        return cancelarVentaLocal(ventaId, orden.status, orden.status_detail);
     }
 
     return cancelarVentaLocal(ventaId, "canceled");
 }
 
-async function cancelarVentaLocal(ventaId, estadoOrden) {
+async function cancelarVentaLocal(ventaId, estadoOrden, detalleEstadoOrden = null) {
     const resultado = await prisma.$transaction(async (tx) => {
         const venta = await tx.venta.findUnique({
             where: { id: ventaId },
@@ -388,6 +406,7 @@ async function cancelarVentaLocal(ventaId, estadoOrden) {
             data: {
                 estado: "CANCELADA",
                 mpOrderStatus: estadoOrden,
+                mpOrderStatusDetail: detalleEstadoOrden,
                 mpQrData: null
             },
             include: { detalles: true }
@@ -454,6 +473,22 @@ async function obtenerVentaPorId(id) {
     return venta;
 }
 
+async function renombrarVenta(id, usuarioId, nombrePersonalizado) {
+    const venta = await prisma.venta.findUnique({
+        where: { id },
+        select: { id: true, usuarioId: true }
+    });
+    if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+    if (venta.usuarioId !== usuarioId) {
+        throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
+    }
+
+    return prisma.venta.update({
+        where: { id },
+        data: { nombrePersonalizado }
+    });
+}
+
 async function obtenerVentaPorCodigoComprobante(codigo) {
     const incluirComprobante = {
         detalles: { include: { producto: true } },
@@ -465,12 +500,13 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
     });
     if (!venta) throw new ErrorPersonalizado("Comprobante no encontrado", 404);
 
+    let verificacionPagoPendiente = false;
     if (venta.estado === "PENDIENTE" && venta.mpOrderId) {
         let orden;
         try {
             orden = await mercadoPagoQrService.obtenerOrden(venta.mpOrderId);
         } catch {
-            // El comprobante sigue disponible aunque Mercado Pago no responda momentaneamente.
+            verificacionPagoPendiente = true;
         }
 
         if (orden && orden.status !== "created") {
@@ -482,9 +518,12 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
         }
     }
 
-    const { mpQrData, mpOrderId, mpOrderStatus, ...comprobante } = venta;
+    const { mpQrData, mpOrderId, mpOrderStatus, mpOrderStatusDetail, ...comprobante } = venta;
     return {
         ...comprobante,
+        estadoPago: mpOrderStatus,
+        detalleEstadoPago: mpOrderStatusDetail,
+        verificacionPagoPendiente,
         pagoQrData: venta.estado === "PENDIENTE" && mpOrderId && mpOrderStatus === "created"
             ? mpQrData
             : null
@@ -492,42 +531,15 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
 }
 
 async function registrarVentaDirecta(cajeroId, datos) {
-    const venta = await registrarVenta(cajeroId, datos, "RAPIDA");
+    const registro = await registrarVenta(cajeroId, datos, "RAPIDA");
+    const { pago, ...venta } = registro;
 
-    if (datos.cobrar && datos.metodoPago === "MercadoPago") {
-        let qr;
-        try {
-            qr = await mercadoPagoQrService.crearQrDinamico(venta);
-            const ventaConQr = await prisma.venta.update({
-                where: { id: venta.id },
-                data: {
-                    mpOrderId: qr.orderId,
-                    mpOrderStatus: qr.status,
-                    mpQrData: qr.qrData
-                },
-                include: {
-                    detalles: { include: { producto: { select: { nombre: true } } } }
-                }
-            });
-
-            return {
-                venta: ventaConQr,
-                pago: {
-                    proveedor: "MercadoPago",
-                    orderId: qr.orderId,
-                    qrData: qr.qrData,
-                    expiresAt: qr.expiresAt,
-                    estado: qr.status
-                },
-                cobradaDirectamente: false
-            };
-        } catch (error) {
-            if (qr?.orderId) {
-                await mercadoPagoQrService.cancelarOrden(qr.orderId, venta.id).catch(function () {});
-            }
-            await cancelarVentaLocal(venta.id, "canceled").catch(function () {});
-            throw error;
-        }
+    if (pago) {
+        return {
+            venta,
+            pago,
+            cobradaDirectamente: false
+        };
     }
 
     if (datos.cobrar && datos.metodoPago) {
@@ -546,11 +558,11 @@ async function registrarVentaDirecta(cajeroId, datos) {
 }
 
 function validarOrdenQr(venta, orden) {
-    if (orden.external_reference !== venta.id) {
+    if (orden.id !== venta.mpOrderId || orden.type !== "qr") {
         throw new ErrorPersonalizado("La orden de Mercado Pago no corresponde a esta venta", 409);
     }
-    if (venta.mpOrderId && orden.id !== venta.mpOrderId) {
-        throw new ErrorPersonalizado("El identificador de la orden no coincide con la venta", 409);
+    if (orden.external_reference !== venta.id) {
+        throw new ErrorPersonalizado("La orden de Mercado Pago no corresponde a esta venta", 409);
     }
     if (orden.currency !== "ARS" || Number(orden.total_amount) !== Number(venta.total)) {
         throw new ErrorPersonalizado("El importe o la moneda de la orden no coincide con la venta", 409);
@@ -572,7 +584,7 @@ async function sincronizarOrdenQr(orden) {
     validarOrdenQr(venta, orden);
 
     if (orden.status === "processed") {
-        if (venta.estado === "COBRADA") return venta;
+        if (["COBRADA", "EN_PREPARACION", "LISTA_PARA_RETIRAR", "RETIRADA"].includes(venta.estado)) return venta;
         if (venta.estado !== "PENDIENTE") {
             throw new ErrorPersonalizado("La orden se pagó pero la venta ya no está pendiente", 409);
         }
@@ -585,6 +597,7 @@ async function sincronizarOrdenQr(orden) {
                     metodoPago: "Mercado Pago QR",
                     mpOrderId: orden.id,
                     mpOrderStatus: orden.status,
+                    mpOrderStatusDetail: orden.status_detail || null,
                     mpQrData: null
                 }
             });
@@ -643,14 +656,51 @@ async function sincronizarOrdenQr(orden) {
 
     if (orden.status === "expired" || orden.status === "canceled") {
         if (venta.estado === "PENDIENTE") {
-            return cancelarVentaLocal(venta.id, orden.status);
+            return cancelarVentaLocal(venta.id, orden.status, orden.status_detail);
         }
         return venta;
     }
 
+    if (orden.status === "refunded") {
+        if (venta.estado === "REEMBOLSADA") return venta;
+
+        return prisma.$transaction(async (tx) => {
+            const actual = await tx.venta.findUnique({
+                where: { id: venta.id },
+                include: { detalles: true }
+            });
+            if (!actual) throw new ErrorPersonalizado("Venta no encontrada", 404);
+            if (actual.estado === "REEMBOLSADA") return actual;
+
+            if (actual.estado === "PENDIENTE") {
+                for (const detalle of actual.detalles) {
+                    await tx.producto.update({
+                        where: { id: detalle.productoId },
+                        data: { stockReservado: { decrement: detalle.cantidad } }
+                    });
+                }
+            }
+
+            return tx.venta.update({
+                where: { id: actual.id },
+                data: {
+                    estado: "REEMBOLSADA",
+                    mpOrderStatus: orden.status,
+                    mpOrderStatusDetail: orden.status_detail || null,
+                    mpQrData: null
+                },
+                include: { detalles: true }
+            });
+        });
+    }
+
     return prisma.venta.update({
         where: { id: venta.id },
-        data: { mpOrderId: orden.id, mpOrderStatus: orden.status },
+        data: {
+            mpOrderId: orden.id,
+            mpOrderStatus: orden.status,
+            mpOrderStatusDetail: orden.status_detail || null
+        },
         include: { detalles: true }
     });
 }
@@ -668,17 +718,24 @@ async function consultarEstadoQr(ventaId) {
             proveedor: "MercadoPago",
             orderId: orden.id,
             estado: orden.status,
+            detalleEstado: orden.status_detail || null,
             qrData: orden.status === "created" ? venta.mpQrData : null,
             expiresAt: orden.expiration_time || null
         }
     };
 }
 
-async function procesarNotificacionQr(notificacion) {
-    const orderId = notificacion?.data?.id;
-    if (!orderId) return null;
+async function procesarNotificacionQr(orderId) {
+    const venta = await prisma.venta.findUnique({
+        where: { mpOrderId: orderId },
+        select: { id: true }
+    });
+    if (!venta) return null;
 
     const orden = await mercadoPagoQrService.obtenerOrden(orderId);
+    if (orden.id !== orderId || orden.type !== "qr") {
+        throw new ErrorPersonalizado("La orden notificada no corresponde a una compra QR local", 409);
+    }
     return sincronizarOrdenQr(orden);
 }
 
@@ -692,6 +749,7 @@ module.exports = {
     cancelarVenta,
     listarVentas,
     obtenerVentaPorId,
+    renombrarVenta,
     obtenerVentaPorCodigoComprobante,
     consultarEstadoQr,
     procesarNotificacionQr

@@ -82,6 +82,7 @@ function generarComprobantePdf(venta) {
 
             const cliente = [venta.clienteNombre, venta.clienteApellido].filter(Boolean).join(" ");
             const datosCompra = [
+                ...(venta.nombrePersonalizado ? [["Nombre de compra", textoDisponible(venta.nombrePersonalizado)]] : []),
                 ["Código", textoDisponible(venta.codigoComprobante)],
                 ["Fecha y hora", formatearFecha(venta.fecha || venta.creadoEn)],
                 ...(venta.fechaRetiro ? [

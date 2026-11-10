@@ -185,6 +185,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
             await prisma.venta.delete({ where: { id: ventaClienteB.id } });
         }
         if (productoTest) {
+            await prisma.detalleVenta.deleteMany({ where: { productoId: productoTest.id } });
             await prisma.producto.delete({ where: { id: productoTest.id } });
         }
         if (categoriaTest) {
@@ -197,7 +198,10 @@ describe("TASK-012: Historial de compras del cliente", () => {
             await prisma.usuario.delete({ where: { id: clienteB.id } });
         }
         await prisma.$disconnect();
-        await new Promise((resolve) => server.close(resolve));
+        await new Promise((resolve, reject) => {
+            server.close((error) => error ? reject(error) : resolve());
+            server.closeAllConnections();
+        });
     });
 
     test("1. Rechaza la petición a GET /ventas si no se envía token (401)", async () => {
@@ -217,6 +221,54 @@ describe("TASK-012: Historial de compras del cliente", () => {
         assert.strictEqual(res.status, 403);
     });
 
+    test("3a. Cliente autenticado puede definir un nombre personalizado al confirmar una compra", async () => {
+        const fechaRetiro = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const fechaRetiroISO = new Date(fechaRetiro.getTime() - fechaRetiro.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+        await prisma.configuracionRetiro.upsert({
+            where: { id: 1 },
+            update: {
+                configuracion: {
+                    diasAtencion: [0, 1, 2, 3, 4, 5, 6],
+                    horaApertura: "08:00",
+                    horaCierre: "20:00",
+                    intervaloMinutos: 60,
+                    excepciones: []
+                }
+            },
+            create: {
+                id: 1,
+                configuracion: {
+                    diasAtencion: [0, 1, 2, 3, 4, 5, 6],
+                    horaApertura: "08:00",
+                    horaCierre: "20:00",
+                    intervaloMinutos: 60,
+                    excepciones: []
+                }
+            }
+        });
+
+        const res = await fetch(`${baseUrl}/ventas`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                nombrePersonalizado: "  Compra   confirmada  ",
+                items: [{ productoId: productoTest.id, cantidad: 1 }],
+                retiro: {
+                    fecha: fechaRetiroISO,
+                    horaInicio: "10:00",
+                    horaFin: "11:00"
+                }
+            })
+        });
+        assert.strictEqual(res.status, 201);
+        const data = await res.json();
+        assert.strictEqual(data.venta.nombrePersonalizado, "Compra confirmada");
+    });
+
     test("3. Cliente autenticado puede consultar su historial y solo ve sus compras", async () => {
         const res = await fetch(`${baseUrl}/ventas`, {
             headers: { Authorization: `Bearer ${tokenClienteA}` }
@@ -233,6 +285,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
 
         const miVenta = data.ventas.find((v) => v.id === ventaClienteA.id);
         assert.ok(miVenta, "Debe incluir la venta del cliente A");
+        assert.strictEqual(miVenta.nombrePersonalizado, null);
         assert.strictEqual(miVenta.codigoComprobante, ventaClienteA.codigoComprobante);
         assert.strictEqual(Number(miVenta.total), 2501.00);
 
@@ -275,7 +328,100 @@ describe("TASK-012: Historial de compras del cliente", () => {
         const data = await res.json();
         assert.ok(data.venta);
         assert.strictEqual(data.venta.id, ventaClienteA.id);
+        assert.strictEqual(data.venta.nombrePersonalizado, null);
         assert.strictEqual(data.venta.detalles[0].producto.nombre, productoTest.nombre);
+    });
+
+    test("Renombrar compra: valida autenticación, propiedad, nombre y conserva datos de venta", async () => {
+        const url = `${baseUrl}/ventas/${ventaClienteA.id}/nombre`;
+        const sinSesion = await fetch(url, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nombrePersonalizado: "Compra semanal" })
+        });
+        assert.strictEqual(sinSesion.status, 401);
+        await sinSesion.arrayBuffer();
+
+        const nombreVacio = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "   " })
+        });
+        assert.strictEqual(nombreVacio.status, 400);
+        await nombreVacio.arrayBuffer();
+
+        const nombreLargo = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "x".repeat(81) })
+        });
+        assert.strictEqual(nombreLargo.status, 400);
+        await nombreLargo.arrayBuffer();
+
+        const codigoOriginal = ventaClienteA.codigoComprobante;
+        const totalOriginal = Number(ventaClienteA.total);
+        const respuestaInicial = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "  Compra   semanal  " })
+        });
+        assert.strictEqual(respuestaInicial.status, 200);
+        const resultadoInicial = await respuestaInicial.json();
+        assert.strictEqual(resultadoInicial.venta.nombrePersonalizado, "Compra semanal");
+        assert.strictEqual(resultadoInicial.venta.codigoComprobante, codigoOriginal);
+        assert.strictEqual(Number(resultadoInicial.venta.total), totalOriginal);
+
+        const historial = await fetch(`${baseUrl}/ventas`, {
+            headers: { Authorization: `Bearer ${tokenClienteA}` }
+        });
+        const historialData = await historial.json();
+        const compraHistorial = historialData.ventas.find((venta) => venta.id === ventaClienteA.id);
+        assert.strictEqual(compraHistorial.nombrePersonalizado, "Compra semanal");
+
+        const detalle = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}`, {
+            headers: { Authorization: `Bearer ${tokenClienteA}` }
+        });
+        const detalleData = await detalle.json();
+        assert.strictEqual(detalleData.venta.nombrePersonalizado, "Compra semanal");
+        assert.strictEqual(detalleData.venta.codigoComprobante, codigoOriginal);
+        assert.strictEqual(Number(detalleData.venta.total), totalOriginal);
+        assert.strictEqual(detalleData.venta.detalles[0].cantidad, 2);
+
+        const respuestaModificacion = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "Compra mensual" })
+        });
+        assert.strictEqual(respuestaModificacion.status, 200);
+        assert.strictEqual((await respuestaModificacion.json()).venta.nombrePersonalizado, "Compra mensual");
+
+        const ajena = await fetch(`${baseUrl}/ventas/${ventaClienteB.id}/nombre`, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "No autorizada" })
+        });
+        assert.strictEqual(ajena.status, 403);
+        await ajena.arrayBuffer();
+        const compraAjena = await prisma.venta.findUnique({
+            where: { id: ventaClienteB.id },
+            select: { nombrePersonalizado: true }
+        });
+        assert.strictEqual(compraAjena.nombrePersonalizado, null);
     });
 
     test("7. El cliente descarga un PDF con los datos históricos de su compra", async () => {
@@ -293,6 +439,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
             data: {
                 usuarioId: clienteA.id,
                 clienteNombre: clienteA.nombre,
+                nombrePersonalizado: "Compra para mi casa",
                 codigoComprobante: `V-TEST-PDF-${Date.now()}`,
                 estado: "COBRADA",
                 total: 2726.75,
@@ -321,6 +468,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
             assert.ok(pdfBytes.endsWith("%%EOF\n"));
             assert.ok(contenido.includes(productoTest.nombre));
             assert.ok(contenido.includes("Producto adicional comprobante"));
+            assert.ok(contenido.includes("Compra para mi casa"));
             assert.ok(bloquesTexto.includes("2"));
             assert.ok(bloquesTexto.includes("3"));
             assert.ok(contenido.includes("2.501,00"));

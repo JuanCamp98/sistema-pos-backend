@@ -26,6 +26,7 @@ function crearContenido(venta) {
     return [
         "Comprobante de compra",
         "",
+        ...(venta.nombrePersonalizado ? [`Nombre de compra: ${venta.nombrePersonalizado}`] : []),
         `Código: ${venta.codigoComprobante}`,
         `Fecha: ${fecha}`,
         "",
@@ -76,6 +77,11 @@ function crearContenidoHtml(venta, frontendUrl) {
         <section style="padding: 28px 32px;">
             <p style="margin: 0 0 20px; color: #52606d; line-height: 1.5;">Gracias por tu compra. Este es el resumen de tu comprobante.</p>
             <table role="presentation" width="100%" style="border-collapse: collapse; margin-bottom: 24px; font-size: 14px;">
+                ${venta.nombrePersonalizado ? `
+                <tr>
+                    <td style="color: #6b7280; padding-bottom: 6px;">Nombre de compra</td>
+                    <td style="text-align: right;">${escaparHtml(venta.nombrePersonalizado)}</td>
+                </tr>` : ""}
                 <tr>
                     <td style="color: #6b7280; padding-bottom: 6px;">Código</td>
                     <td style="text-align: right; font-family: monospace;">${escaparHtml(venta.codigoComprobante)}</td>

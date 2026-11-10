@@ -1,6 +1,17 @@
 const { z } = require("zod");
 const { retiroVentaSchema } = require("./retiroSchema");
 
+const normalizarNombrePersonalizado = (nombre) => nombre
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const nombrePersonalizadoSchema = z.string()
+    .transform((nombre) => normalizarNombrePersonalizado(nombre))
+    .pipe(z.string()
+        .min(1, "El nombre de la compra no puede estar vacio")
+        .max(80, "El nombre de la compra no puede superar los 80 caracteres"));
+
 const clienteSchema = z.object({
     nombre: z.string().min(1, "El nombre del cliente es obligatorio"),
     apellido: z.string().min(1, "El apellido del cliente es obligatorio"),
@@ -21,7 +32,8 @@ const registrarVentaSchema = z.object({
     ).min(1, "La venta debe tener al menos un producto"),
     cliente: clienteSchema.optional(),
     metodoPago: z.string().min(1).optional(),
-    retiro: retiroVentaSchema
+    retiro: retiroVentaSchema,
+    nombrePersonalizado: nombrePersonalizadoSchema.optional()
 });
 
 const clienteVentaDirectaSchema = z.object({
@@ -44,7 +56,8 @@ const ventaDirectaSchema = z.object({
     ).min(1, "La venta debe tener al menos un producto"),
     cliente: clienteVentaDirectaSchema,
     metodoPago: z.string().min(1).optional(),
-    cobrar: z.boolean().optional()
+    cobrar: z.boolean().optional(),
+    nombrePersonalizado: nombrePersonalizadoSchema.optional()
 }).refine(
     (data) => !data.cobrar || Boolean(data.metodoPago && data.metodoPago.trim().length > 0),
     { message: "El metodo de pago es obligatorio para cobrar la venta directamente", path: ["metodoPago"] }
@@ -73,12 +86,24 @@ const cobrarVentaSchema = z.object({
     }
 });
 
+const renombrarVentaSchema = z.object({
+    nombrePersonalizado: nombrePersonalizadoSchema
+}).strict();
+
 const listarVentasQuerySchema = z.object({
     pagina: z.coerce.number().int().positive().optional(),
     limite: z.coerce.number().int().positive().optional(),
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().optional(),
-    estado: z.enum(["PENDIENTE", "COBRADA", "CANCELADA"]).optional(),
+    estado: z.enum([
+        "PENDIENTE",
+        "COBRADA",
+        "EN_PREPARACION",
+        "LISTA_PARA_RETIRAR",
+        "RETIRADA",
+        "CANCELADA",
+        "REEMBOLSADA"
+    ]).optional(),
     fechaDesde: z.coerce.date().optional(),
     fechaHasta: z.coerce.date().optional(),
     clienteId: z.string().uuid("El id de cliente no es valido").optional()
@@ -99,6 +124,7 @@ module.exports = {
     ventaDirectaSchema,
     cobrarVentaSchema,
     cancelarVentaSchema,
+    renombrarVentaSchema,
     listarVentasQuerySchema,
     clienteSchema
 };

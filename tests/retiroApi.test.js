@@ -123,17 +123,20 @@ describe("API de disponibilidad y retiro programado", () => {
             method: "POST",
             body: {
                 items: [{ productoId: producto.id, cantidad: 1 }],
+                nombrePersonalizado: "  Compra   semanal  ",
                 retiro: { fecha: fechaRetiro, horaInicio: "09:00", horaFin: "10:00" }
             }
         });
         assert.equal(registrada.respuesta.status, 201);
         venta = registrada.datos.venta;
+        assert.equal(venta.nombrePersonalizado, "Compra semanal");
         assert.equal(venta.fechaRetiro.slice(0, 10), fechaRetiro);
         assert.equal(venta.horarioRetiroInicio, "09:00");
         assert.equal(venta.horarioRetiroFin, "10:00");
 
         const detalleCliente = await solicitar("/ventas/comprobante/" + venta.codigoComprobante);
         assert.equal(detalleCliente.respuesta.status, 200);
+        assert.equal(detalleCliente.datos.venta.nombrePersonalizado, "Compra semanal");
         assert.equal(detalleCliente.datos.venta.fechaRetiro.slice(0, 10), fechaRetiro);
 
         const detalleAdmin = await solicitar("/ventas/" + venta.id, { token: tokenAdministrador });
