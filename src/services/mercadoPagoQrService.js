@@ -67,13 +67,20 @@ async function crearQrDinamico(venta) {
     const { externalPosId } = obtenerConfiguracion();
     const total = aMontoApi(venta.total);
     const items = venta.detalles.map(function (detalle) {
+        const cantidadPagada = detalle.cantidad - Number(detalle.unidadesBonificadas || 0);
+        const esCombo = Number(detalle.combosAplicados || 0) > 0;
+        const titulo = detalle.producto.nombre +
+            (esCombo ? " x" + detalle.cantidad : "") +
+            (detalle.promocionTitulo ? " - " + detalle.promocionTitulo : "");
         return {
-            title: detalle.producto.nombre.slice(0, 120),
-            unit_price: aMontoApi(detalle.precioUnitario),
-            quantity: detalle.cantidad,
+            title: titulo.slice(0, 120),
+            unit_price: aMontoApi(esCombo
+                ? detalle.subtotal
+                : detalle.unidadesBonificadas ? detalle.precioUnitario : Number(detalle.subtotal) / detalle.cantidad),
+            quantity: esCombo ? 1 : cantidadPagada,
             unit_measure: "unit"
         };
-    });
+    }).filter((item) => item.quantity > 0);
 
     const orden = await solicitarMercadoPago(API_URL, {
         method: "POST",

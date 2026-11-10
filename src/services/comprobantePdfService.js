@@ -29,8 +29,14 @@ function formatearFecha(fecha) {
 
 function formatearFechaRetiro(fecha) {
     if (!fecha) return null;
-    const fechaUtc = new Date(`${fecha}T00:00:00.000Z`);
+    if (fecha instanceof Date && Number.isNaN(fecha.getTime())) return null;
+    const fechaIso = fecha instanceof Date
+        ? fecha.toISOString().slice(0, 10)
+        : String(fecha).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaIso)) return null;
+    const fechaUtc = new Date(`${fechaIso}T00:00:00.000Z`);
     if (Number.isNaN(fechaUtc.getTime())) return null;
+    if (fechaUtc.toISOString().slice(0, 10) !== fechaIso) return null;
     return fechaUtc.toLocaleDateString("es-AR", {
         timeZone: "UTC",
         day: "2-digit",
@@ -104,12 +110,19 @@ function generarComprobantePdf(venta) {
 
             const columnas = agregarEncabezadoTabla(documento);
             const detalles = Array.isArray(venta.detalles) ? venta.detalles : [];
+            const descuentoTotalCentavos = detalles.reduce(function (total, detalle) {
+                return total + Math.round(Number(detalle.descuentoTotal || 0) * 100);
+            }, 0);
 
             if (detalles.length === 0) {
                 documento.font("Helvetica").fontSize(10).fillColor("#52606d").text("No hay productos registrados para esta compra.");
             } else {
                 detalles.forEach(function (detalle) {
-                    const nombre = textoDisponible(detalle?.producto?.nombre, "Producto no disponible");
+                    const nombreProducto = textoDisponible(detalle?.producto?.nombre, "Producto no disponible");
+                    const observacionPromocion = detalle?.promocionTitulo
+                        ? `\n${detalle.promocionTitulo}${detalle.combosAplicados ? `: ${detalle.combosAplicados} combo(s) aplicado(s)` : detalle.unidadesBonificadas ? `: ${detalle.unidadesBonificadas} unidad(es) bonificada(s)` : ""}`
+                        : "";
+                    const nombre = nombreProducto + observacionPromocion;
                     const cantidad = textoDisponible(detalle?.cantidad);
                     const precioUnitario = formatearImporte(detalle?.precioUnitario);
                     const subtotal = formatearImporte(detalle?.subtotal);
@@ -143,7 +156,7 @@ function generarComprobantePdf(venta) {
             documento.moveDown(0.8);
             documento.x = MARGEN;
             documento.font("Helvetica").fontSize(9).fillColor("#52606d")
-                .text("Descuentos: no registrados por separado en esta venta.", MARGEN, documento.y, {
+                .text("Descuentos: " + formatearImporte(descuentoTotalCentavos / 100), MARGEN, documento.y, {
                     width: documento.page.width - MARGEN * 2,
                     align: "left"
                 });

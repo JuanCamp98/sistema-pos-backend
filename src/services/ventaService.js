@@ -4,7 +4,7 @@ const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const mailService = require("./mailService");
 const mercadoPagoQrService = require("./mercadoPagoQrService");
 const { calcularPaginacion, calcularTotalPaginas } = require("../utils/paginacion");
-const { calcularPrecioPromocional } = require("./promocionService");
+const { calcularPrecioPromocional, calcularPromocionesCombo } = require("./promocionService");
 const { validarHorarioRetiro } = require("./retiroService");
 
 function generarCodigoComprobante() {
@@ -52,14 +52,20 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
         throw new ErrorPersonalizado("La fecha y el horario de retiro son obligatorios", 400);
     }
 
+    const cantidadesPorProducto = new Map();
+    for (const item of items) {
+        cantidadesPorProducto.set(item.productoId, (cantidadesPorProducto.get(item.productoId) || 0) + item.cantidad);
+    }
+    const itemsAgrupados = Array.from(cantidadesPorProducto, ([productoId, cantidad]) => ({ productoId, cantidad }));
+
     const resultado = await prisma.$transaction(async (tx) => {
         const fechaRetiro = origen === "AUTOGESTION"
             ? await validarHorarioRetiro(tx, retiro)
             : null;
         let totalCentavos = 0;
-        const detalles = [];
+        const productosCalculados = [];
 
-        for (const item of items) {
+        for (const item of itemsAgrupados) {
             const producto = await tx.producto.findUnique({ where: { id: item.productoId } });
             if (!producto || !producto.activo) {
                 throw new ErrorPersonalizado("Producto no encontrado: " + item.productoId, 404);
@@ -79,22 +85,37 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
 
             const precio = await calcularPrecioPromocional(tx, {
                 ...producto,
-                categoria: (await tx.categoria.findUnique({ where: { id: producto.categoriaId }, select: { nombre: true } })).nombre
+                categoria: (await tx.categoria.findUnique({ where: { id: producto.categoriaId }, select: { nombre: true } })).nombre,
+                cantidad: item.cantidad
             });
             if (precio.promocionNoAplicable) {
                 throw new ErrorPersonalizado(precio.promocionNoAplicable.mensaje, 409);
             }
-            const precioUnitarioCentavos = Math.round(precio.precioFinal * 100);
-            const subtotalCentavos = precioUnitarioCentavos * item.cantidad;
-            totalCentavos += subtotalCentavos;
-
-            detalles.push({
-                productoId: producto.id,
+            productosCalculados.push({
+                producto,
                 cantidad: item.cantidad,
-                precioUnitario: precioUnitarioCentavos / 100,
-                subtotal: subtotalCentavos / 100
+                precio
             });
         }
+
+        const calculosCombo = calcularPromocionesCombo(productosCalculados);
+        const detalles = productosCalculados.map((item) => {
+            const calculoCombo = calculosCombo.get(item.producto.id);
+            const precioUnitarioCentavos = Math.round(item.precio.precioOriginal * 100);
+            const subtotalCentavos = calculoCombo.subtotalCentavos;
+            totalCentavos += subtotalCentavos;
+
+            return {
+                productoId: item.producto.id,
+                cantidad: item.cantidad,
+                precioUnitario: precioUnitarioCentavos / 100,
+                subtotal: subtotalCentavos / 100,
+                descuentoTotal: calculoCombo.descuentoTotalCentavos / 100,
+                unidadesBonificadas: calculoCombo.unidadesBonificadas,
+                combosAplicados: calculoCombo.combosAplicados,
+                promocionTitulo: calculoCombo.promocionTitulo
+            };
+        });
 
         const nombrePersonalizadoNormalizado = normalizarNombrePersonalizado(nombrePersonalizado);
 
@@ -242,6 +263,17 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
             }
         }
 
+        const actualizacionVenta = await tx.venta.updateMany({
+            where: { id: ventaId, estado: "PENDIENTE" },
+            data: {
+                estado: "COBRADA",
+                metodoPago: metodoPago
+            }
+        });
+        if (actualizacionVenta.count !== 1) {
+            throw new ErrorPersonalizado("La venta cambió mientras se procesaba el cobro", 409);
+        }
+
         for (const detalle of venta.detalles) {
             await tx.movimientoStock.create({
                 data: {
@@ -261,12 +293,8 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
             });
         }
 
-        const ventaCobrada = await tx.venta.update({
+        const ventaCobrada = await tx.venta.findUnique({
             where: { id: ventaId },
-            data: {
-                estado: "COBRADA",
-                metodoPago: metodoPago
-            },
             include: {
                 detalles: { include: { producto: { select: { nombre: true } } } },
                 usuario: { select: { email: true } }
@@ -379,6 +407,19 @@ async function cancelarVenta(ventaId) {
     return cancelarVentaLocal(ventaId, "canceled");
 }
 
+async function cancelarVentaCliente(ventaId, usuarioId) {
+    const venta = await prisma.venta.findFirst({
+        where: { id: ventaId, usuarioId },
+        select: { id: true, estado: true }
+    });
+    if (!venta) throw new ErrorPersonalizado("Compra no encontrada", 404);
+    if (venta.estado !== "PENDIENTE") {
+        throw new ErrorPersonalizado("Solo se pueden cancelar compras pendientes", 409);
+    }
+
+    return cancelarVenta(venta.id);
+}
+
 async function cancelarVentaLocal(ventaId, estadoOrden, detalleEstadoOrden = null) {
     const resultado = await prisma.$transaction(async (tx) => {
         const venta = await tx.venta.findUnique({
@@ -387,11 +428,17 @@ async function cancelarVentaLocal(ventaId, estadoOrden, detalleEstadoOrden = nul
         });
 
         if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
-        if (venta.estado !== "PENDIENTE") {
-            throw new ErrorPersonalizado(
-                "Solo se pueden cancelar ventas en estado PENDIENTE (estado actual: " + venta.estado + ")",
-                400
-            );
+        const actualizacionVenta = await tx.venta.updateMany({
+            where: { id: ventaId, estado: "PENDIENTE" },
+            data: {
+                estado: "CANCELADA",
+                mpOrderStatus: estadoOrden,
+                mpOrderStatusDetail: detalleEstadoOrden,
+                mpQrData: null
+            }
+        });
+        if (actualizacionVenta.count !== 1) {
+            throw new ErrorPersonalizado("La venta ya no está pendiente y no se puede cancelar", 409);
         }
 
         for (const detalle of venta.detalles) {
@@ -401,14 +448,8 @@ async function cancelarVentaLocal(ventaId, estadoOrden, detalleEstadoOrden = nul
             });
         }
 
-        const ventaCancelada = await tx.venta.update({
+        const ventaCancelada = await tx.venta.findUnique({
             where: { id: ventaId },
-            data: {
-                estado: "CANCELADA",
-                mpOrderStatus: estadoOrden,
-                mpOrderStatusDetail: detalleEstadoOrden,
-                mpQrData: null
-            },
             include: { detalles: true }
         });
 
@@ -747,6 +788,7 @@ module.exports = {
     marcarVentaListaParaRetirar,
     marcarVentaRetirada,
     cancelarVenta,
+    cancelarVentaCliente,
     listarVentas,
     obtenerVentaPorId,
     renombrarVenta,

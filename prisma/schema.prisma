@@ -89,6 +89,8 @@ model TipoProducto {
 enum TipoDescuento {
   PORCENTAJE
   IMPORTE
+  DOS_POR_UNO
+  COMBO
 }
 
 model Promocion {
@@ -96,7 +98,8 @@ model Promocion {
   titulo         String
   descripcion    String?
   tipoDescuento  TipoDescuento @map("tipo_descuento")
-  valorDescuento Decimal       @map("valor_descuento") @db.Decimal(10, 2)
+  valorDescuento Decimal?      @map("valor_descuento") @db.Decimal(10, 2)
+  precioCombo    Decimal?      @map("precio_combo") @db.Decimal(10, 2)
   fechaInicio    DateTime      @map("fecha_inicio")
   fechaFin       DateTime      @map("fecha_fin")
   activo         Boolean       @default(true)
@@ -204,12 +207,16 @@ model Notificacion {
 
 // Cada producto vendido dentro de una venta
 model DetalleVenta {
-  id             String  @id @default(uuid())
-  ventaId        String  @map("venta_id")
-  productoId     String  @map("producto_id")
-  cantidad       Int
-  precioUnitario Decimal @map("precio_unitario") @db.Decimal(10, 2)
-  subtotal       Decimal @db.Decimal(10, 2)
+  id                 String  @id @default(uuid())
+  ventaId            String  @map("venta_id")
+  productoId         String  @map("producto_id")
+  cantidad           Int
+  precioUnitario     Decimal @map("precio_unitario") @db.Decimal(10, 2)
+  subtotal           Decimal @db.Decimal(10, 2)
+  descuentoTotal     Decimal @default(0) @map("descuento_total") @db.Decimal(10, 2)
+  unidadesBonificadas Int    @default(0) @map("unidades_bonificadas")
+  combosAplicados    Int     @default(0) @map("combos_aplicados")
+  promocionTitulo    String? @map("promocion_titulo")
 
   venta    Venta    @relation(fields: [ventaId], references: [id])
   producto Producto @relation(fields: [productoId], references: [id])

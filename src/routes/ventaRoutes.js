@@ -45,6 +45,11 @@ router.get(
 // GET /ventas/comprobante/:codigo: publico para reimprimir.
 // Va antes de /:id para que Express no matchee "comprobante" como id.
 router.get(
+    "/comprobante/:codigo/pdf",
+    ventaController.descargarComprobantePdfPorCodigo
+);
+
+router.get(
     "/comprobante/:codigo",
     ventaController.buscarPorComprobante
 );
@@ -105,6 +110,14 @@ router.patch(
     intentarAutenticar,
     validar(cancelarVentaSchema),
     ventaController.cancelar
+);
+
+// PATCH /ventas/:id/cancelar-cliente: un cliente autenticado solo cancela compras propias.
+router.patch(
+    "/:id/cancelar-cliente",
+    verificarToken,
+    verificarRol(["Cliente"]),
+    ventaController.cancelarCliente
 );
 
 // Flujo de preparación y retiro: no modifica ni consulta el estado de Mercado Pago.

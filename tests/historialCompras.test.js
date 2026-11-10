@@ -441,6 +441,9 @@ describe("TASK-012: Historial de compras del cliente", () => {
                 clienteNombre: clienteA.nombre,
                 nombrePersonalizado: "Compra para mi casa",
                 codigoComprobante: `V-TEST-PDF-${Date.now()}`,
+                fechaRetiro: new Date("2030-05-17T00:00:00.000Z"),
+                horarioRetiroInicio: "08:00",
+                horarioRetiroFin: "09:00",
                 estado: "COBRADA",
                 total: 2726.75,
                 detalles: {
@@ -469,17 +472,57 @@ describe("TASK-012: Historial de compras del cliente", () => {
             assert.ok(contenido.includes(productoTest.nombre));
             assert.ok(contenido.includes("Producto adicional comprobante"));
             assert.ok(contenido.includes("Compra para mi casa"));
+            assert.ok(contenido.includes("Fecha de retiro"));
+            assert.ok(contenido.includes("17/05/2030"));
+            assert.ok(contenido.includes("08:00 a 09:00"));
+            assert.ok(!contenido.includes("Fecha de retironull"));
             assert.ok(bloquesTexto.includes("2"));
             assert.ok(bloquesTexto.includes("3"));
             assert.ok(contenido.includes("2.501,00"));
             assert.ok(contenido.includes("75,25"));
             assert.ok(contenido.includes("2.726,75"));
-            assert.ok(contenido.includes("Descuentos: no registrados por separado"));
+            assert.match(contenido, /Descuentos:.*0,00/);
             assert.ok(contenido.includes("COBRADA"));
         } finally {
             await prisma.detalleVenta.deleteMany({ where: { ventaId: ventaPdf.id } });
             await prisma.venta.delete({ where: { id: ventaPdf.id } });
             await prisma.producto.delete({ where: { id: productoAdicional.id } });
+        }
+    });
+
+    test("7a. La compra anónima de autogestión descarga el PDF usando el código público sin sesión", async () => {
+        const codigoComprobante = `V-TEST-ANONIMO-${Date.now()}`;
+        const ventaAnonima = await prisma.venta.create({
+            data: {
+                codigoComprobante,
+                clienteNombre: "Consumidor final",
+                estado: "COBRADA",
+                total: 1250.50,
+                detalles: {
+                    create: [{
+                        productoId: productoTest.id,
+                        cantidad: 1,
+                        precioUnitario: 1250.50,
+                        subtotal: 1250.50
+                    }]
+                }
+            }
+        });
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/comprobante/${encodeURIComponent(codigoComprobante)}/pdf`);
+            assert.strictEqual(res.status, 200);
+            assert.match(res.headers.get("content-type"), /application\/pdf/);
+            assert.match(res.headers.get("content-disposition"), /comprobante-compra-V-TEST-ANONIMO-/);
+            assert.strictEqual(res.headers.get("cache-control"), "no-store");
+
+            const pdf = Buffer.from(await res.arrayBuffer());
+            assert.strictEqual(pdf.subarray(0, 5).toString(), "%PDF-");
+            assert.ok(extraerTextoPdf(pdf).includes(codigoComprobante));
+            assert.ok(extraerTextoPdf(pdf).includes(productoTest.nombre));
+        } finally {
+            await prisma.detalleVenta.deleteMany({ where: { ventaId: ventaAnonima.id } });
+            await prisma.venta.delete({ where: { id: ventaAnonima.id } });
         }
     });
 
