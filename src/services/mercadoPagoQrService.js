@@ -109,7 +109,8 @@ async function crearQrDinamico(venta) {
         orderId: orden.id,
         qrData: qrData,
         expiresAt: orden.expiration_time || null,
-        status: orden.status
+        status: orden.status,
+        statusDetail: orden.status_detail || null
     };
 }
 

@@ -79,10 +79,40 @@ async function iniciarSesion(datos) {
             id: usuario.id,
             nombre: usuario.nombre,
             apellido: usuario.apellido,
+            dni: usuario.dni,
             email: usuario.email,
             rol: usuario.rol.nombre
         }
     };
 }
 
-module.exports = { registrarUsuario, iniciarSesion };
+async function obtenerPerfilUsuario(usuarioId) {
+    const usuario = await prisma.usuario.findUnique({
+        where: { id: usuarioId },
+        select: {
+            id: true,
+            nombre: true,
+            apellido: true,
+            dni: true,
+            email: true,
+            rol: { select: { nombre: true } }
+        }
+    });
+
+    if (!usuario) {
+        const error = new Error("Usuario no encontrado");
+        error.status = 404;
+        throw error;
+    }
+
+    return {
+        id: usuario.id,
+        nombre: usuario.nombre,
+        apellido: usuario.apellido,
+        dni: usuario.dni,
+        email: usuario.email,
+        rol: usuario.rol.nombre
+    };
+}
+
+module.exports = { registrarUsuario, iniciarSesion, obtenerPerfilUsuario };

@@ -138,6 +138,7 @@ enum EstadoVenta {
   LISTA_PARA_RETIRAR
   RETIRADA
   CANCELADA
+  REEMBOLSADA
 }
 
 enum OrigenVenta {
@@ -158,12 +159,14 @@ model Venta {
   clienteApellido   String?     @map("cliente_apellido")
   clienteDni        String?     @map("cliente_dni")
   clienteEmail      String?     @map("cliente_email")
+  nombrePersonalizado String?   @map("nombre_personalizado") @db.VarChar(80)
   codigoComprobante String      @unique @map("codigo_comprobante")
   estado            EstadoVenta @default(PENDIENTE)
   origen            OrigenVenta @default(AUTOGESTION)
   metodoPago        String?     @map("metodo_pago")
   mpOrderId         String?     @unique @map("mp_order_id")
   mpOrderStatus     String?     @map("mp_order_status")
+  mpOrderStatusDetail String?   @map("mp_order_status_detail")
   mpQrData          String?     @map("mp_qr_data") @db.Text
   creadoEn          DateTime    @default(now()) @map("creado_en")
   actualizadoEn     DateTime    @updatedAt @map("actualizado_en")

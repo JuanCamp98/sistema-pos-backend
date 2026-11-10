@@ -114,6 +114,20 @@ async function obtenerPorId(req, res, next) {
     } catch (error) { next(error); }
 }
 
+async function renombrar(req, res, next) {
+    try {
+        const venta = await ventaService.renombrarVenta(
+            req.params.id,
+            req.usuario.id,
+            req.body.nombrePersonalizado
+        );
+        res.status(200).json({
+            mensaje: "Nombre de la compra actualizado correctamente",
+            venta
+        });
+    } catch (error) { next(error); }
+}
+
 async function descargarComprobantePdf(req, res, next) {
     try {
         const venta = await ventaService.obtenerVentaPorId(req.params.id);
@@ -147,7 +161,7 @@ async function consultarEstadoQr(req, res, next) {
 
 async function webhookMercadoPago(req, res, next) {
     try {
-        await ventaService.procesarNotificacionQr(req.body);
+        await ventaService.procesarNotificacionQr(req.mercadoPagoOrderId);
         res.sendStatus(200);
     } catch (error) { next(error); }
 }
@@ -162,6 +176,7 @@ module.exports = {
     retirar,
     listar,
     obtenerPorId,
+    renombrar,
     descargarComprobantePdf,
     buscarPorComprobante,
     consultarEstadoQr,
