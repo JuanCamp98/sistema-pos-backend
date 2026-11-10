@@ -70,6 +70,16 @@ async function cancelar(req, res, next) {
     } catch (error) { next(error); }
 }
 
+async function cancelarCliente(req, res, next) {
+    try {
+        const ventaCancelada = await ventaService.cancelarVentaCliente(req.params.id, req.usuario.id);
+        res.status(200).json({
+            mensaje: "Compra cancelada correctamente",
+            venta: ventaCancelada
+        });
+    } catch (error) { next(error); }
+}
+
 async function preparar(req, res, next) {
     try {
         const venta = await ventaService.marcarVentaEnPreparacion(req.params.id);
@@ -132,17 +142,28 @@ async function descargarComprobantePdf(req, res, next) {
     try {
         const venta = await ventaService.obtenerVentaPorId(req.params.id);
         verificarAccesoVenta(req.usuario, venta);
-        const pdf = await comprobantePdfService.generarComprobantePdf(venta);
-        const codigoSeguro = String(venta.codigoComprobante || "compra").replace(/[^a-zA-Z0-9_-]/g, "-");
-
-        res.set({
-            "Content-Type": "application/pdf",
-            "Content-Disposition": `attachment; filename="comprobante-compra-${codigoSeguro}.pdf"`,
-            "Content-Length": pdf.length,
-            "Cache-Control": "private, no-store"
-        });
-        res.status(200).send(pdf);
+        await enviarComprobantePdf(res, venta, "private, no-store");
     } catch (error) { next(error); }
+}
+
+async function descargarComprobantePdfPorCodigo(req, res, next) {
+    try {
+        const venta = await ventaService.obtenerVentaPorCodigoComprobante(req.params.codigo);
+        await enviarComprobantePdf(res, venta, "no-store");
+    } catch (error) { next(error); }
+}
+
+async function enviarComprobantePdf(res, venta, cacheControl) {
+    const pdf = await comprobantePdfService.generarComprobantePdf(venta);
+    const codigoSeguro = String(venta.codigoComprobante || "compra").replace(/[^a-zA-Z0-9_-]/g, "-");
+
+    res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="comprobante-compra-${codigoSeguro}.pdf"`,
+        "Content-Length": pdf.length,
+        "Cache-Control": cacheControl
+    });
+    res.status(200).send(pdf);
 }
 
 async function buscarPorComprobante(req, res, next) {
@@ -171,6 +192,7 @@ module.exports = {
     registrarDirecta,
     cobrar,
     cancelar,
+    cancelarCliente,
     preparar,
     listaParaRetirar,
     retirar,
@@ -178,6 +200,7 @@ module.exports = {
     obtenerPorId,
     renombrar,
     descargarComprobantePdf,
+    descargarComprobantePdfPorCodigo,
     buscarPorComprobante,
     consultarEstadoQr,
     webhookMercadoPago
