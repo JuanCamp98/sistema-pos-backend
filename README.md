@@ -23,6 +23,8 @@ La documentación detallada del proyecto (modelo de datos, endpoints, decisiones
 * Prisma ORM
 * JWT (autenticación)
 * bcryptjs (encriptación de contraseñas)
+* PDFKit (generación de reportes PDF)
+* ExcelJS (generación de reportes XLSX)
 
 ## Instalación
 
@@ -72,6 +74,16 @@ npm run dev
 * **Productos**: CRUD completo con borrado lógico
 * **Stock**: registro de movimientos (entradas/salidas) con historial
 * **Ventas**: registro de ventas con transacción atómica (descuenta stock automáticamente) e historial de ventas
+* **Reportes**: exportación de ventas y stock a PDF o Excel, protegida para Administradores
+
+## Exportación de reportes
+
+Los siguientes endpoints requieren autenticación JWT y rol `Administrador`; generan el archivo completo sin límite de paginación:
+
+* `GET /reportes/ventas.pdf` y `GET /reportes/ventas.xlsx`: aceptan `fechaDesde`, `fechaHasta`, `estado` y `buscar` (código de comprobante).
+* `GET /reportes/stock.pdf` y `GET /reportes/stock.xlsx`: aceptan `bajo=true` para exportar solo productos con hasta 5 unidades disponibles.
+
+Los reportes de ventas incluyen comprobante, fecha, cliente, estado, método de pago y total. Los de stock incluyen producto, categoría, tipo, precio, stock físico, reservado y disponible (`stock - stockReservado`). PDFKit ya se usa para comprobantes; ExcelJS genera los libros `.xlsx`.
 
 ## Notificaciones internas
 

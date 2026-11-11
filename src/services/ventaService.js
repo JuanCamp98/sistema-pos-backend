@@ -459,12 +459,13 @@ async function cancelarVentaLocal(ventaId, estadoOrden, detalleEstadoOrden = nul
     return resultado;
 }
 
-async function listarVentas(filtros) {
-    const { skip, take, page, limit } = calcularPaginacion(filtros.pagina, filtros.limite);
-
-    const where = {
+function crearFiltrosVentas(filtros) {
+    return {
         ...(filtros.estado && { estado: filtros.estado }),
         ...(filtros.clienteId && { usuarioId: filtros.clienteId }),
+        ...(filtros.buscar && {
+            codigoComprobante: { contains: filtros.buscar, mode: "insensitive" }
+        }),
         ...((filtros.fechaDesde || filtros.fechaHasta) && {
             fecha: {
                 ...(filtros.fechaDesde && { gte: filtros.fechaDesde }),
@@ -472,6 +473,11 @@ async function listarVentas(filtros) {
             }
         })
     };
+}
+
+async function listarVentas(filtros) {
+    const { skip, take, page, limit } = calcularPaginacion(filtros.pagina, filtros.limite);
+    const where = crearFiltrosVentas(filtros);
 
     const [ventas, total] = await prisma.$transaction([
         prisma.venta.findMany({
@@ -500,6 +506,25 @@ async function listarVentas(filtros) {
             totalRegistros: total
         }
     };
+}
+
+async function listarVentasParaReporte(filtros) {
+    return prisma.venta.findMany({
+        where: crearFiltrosVentas(filtros),
+        select: {
+            codigoComprobante: true,
+            fecha: true,
+            clienteNombre: true,
+            clienteApellido: true,
+            estado: true,
+            metodoPago: true,
+            total: true,
+            usuario: {
+                select: { nombre: true, apellido: true }
+            }
+        },
+        orderBy: { fecha: "desc" }
+    });
 }
 
 async function obtenerVentaPorId(id) {
@@ -790,6 +815,7 @@ module.exports = {
     cancelarVenta,
     cancelarVentaCliente,
     listarVentas,
+    listarVentasParaReporte,
     obtenerVentaPorId,
     renombrarVenta,
     obtenerVentaPorCodigoComprobante,
