@@ -190,4 +190,31 @@ async function enviarAvisoPedidoListo(venta) {
     return { enviado: true, estado: "ENVIADO", destinatario };
 }
 
-module.exports = { enviarComprobanteVenta, enviarAvisoPedidoListo };
+async function enviarCorreoRecuperacionContrasena(destinatario, token) {
+    const configuracion = obtenerConfiguracion();
+    if (!configuracion.host || !configuracion.user || !configuracion.pass || !configuracion.frontendUrl) {
+        throw new Error("El servicio de correo o la URL del frontend no están configurados");
+    }
+
+    const urlRecuperacion = `${configuracion.frontendUrl.replace(/\/$/, "")}/restablecer-contrasena?token=${encodeURIComponent(token)}`;
+    const transportador = nodemailer.createTransport({
+        host: configuracion.host,
+        port: configuracion.port,
+        secure: configuracion.secure,
+        auth: { user: configuracion.user, pass: configuracion.pass }
+    });
+
+    await transportador.sendMail({
+        from: configuracion.from,
+        to: destinatario,
+        subject: "Restablecé tu contraseña de Sistema POS",
+        text: `Recibimos una solicitud para restablecer tu contraseña. Usá este enlace dentro de una hora:\n\n${urlRecuperacion}\n\nSi no solicitaste este cambio, podés ignorar este correo.`,
+        html: `<main style="max-width: 620px; margin: 0 auto; padding: 28px; background: #ffffff; color: #1f2933; font-family: Arial, sans-serif; border: 1px solid #ddd7ca;"><p style="color: #24543d; font-size: 12px; letter-spacing: 2px; text-transform: uppercase;">Sistema POS</p><h1>Restablecé tu contraseña</h1><p>Recibimos una solicitud para cambiar la contraseña de tu cuenta. El enlace vence en una hora.</p><a href="${escaparHtml(urlRecuperacion)}" style="display: inline-block; margin-top: 16px; padding: 13px 20px; background: #24543d; color: #ffffff; font-weight: 700; text-decoration: none;">Crear nueva contraseña</a><p style="margin-top: 24px; color: #6b7280; font-size: 13px;">Si no solicitaste este cambio, podés ignorar este correo.</p></main>`
+    });
+}
+
+module.exports = {
+    enviarComprobanteVenta,
+    enviarAvisoPedidoListo,
+    enviarCorreoRecuperacionContrasena
+};

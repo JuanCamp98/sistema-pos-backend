@@ -1,7 +1,21 @@
 // Logica de negocio relacionada a los usuarios
+const crypto = require("node:crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
+const mailService = require("./mailService");
+
+const DURACION_TOKEN_RECUPERACION_MS = 60 * 60 * 1000;
+
+function crearErrorTokenRecuperacion() {
+    const error = new Error("El enlace de recuperación no es válido o venció.");
+    error.status = 400;
+    return error;
+}
+
+function obtenerHashToken(token) {
+    return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 async function registrarUsuario(datos) {
     const { nombre, apellido, dni, email, contrasena, rol } = datos;
@@ -86,6 +100,74 @@ async function iniciarSesion(datos) {
     };
 }
 
+async function solicitarRecuperacionContrasena(email) {
+    const usuario = await prisma.usuario.findUnique({
+        where: { email },
+        select: {
+            id: true,
+            rol: { select: { nombre: true } }
+        }
+    });
+
+    if (!usuario || usuario.rol.nombre !== "Cliente") {
+        return;
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = obtenerHashToken(token);
+    const venceEn = new Date(Date.now() + DURACION_TOKEN_RECUPERACION_MS);
+
+    await prisma.recuperacionContrasena.deleteMany({
+        where: { usuarioId: usuario.id }
+    });
+
+    const recuperacion = await prisma.recuperacionContrasena.create({
+        data: { usuarioId: usuario.id, tokenHash, venceEn }
+    });
+
+    try {
+        await mailService.enviarCorreoRecuperacionContrasena(email, token);
+    } catch (error) {
+        console.error("No se pudo enviar el correo de recuperación:", error.message);
+        await prisma.recuperacionContrasena.deleteMany({
+            where: { id: recuperacion.id }
+        });
+    }
+}
+
+async function restablecerContrasena(token, contrasena) {
+    const tokenHash = obtenerHashToken(token);
+    const ahora = new Date();
+    const recuperacion = await prisma.recuperacionContrasena.findUnique({
+        where: { tokenHash },
+        select: { id: true, usuarioId: true, venceEn: true }
+    });
+
+    if (!recuperacion || recuperacion.venceEn <= ahora) {
+        throw crearErrorTokenRecuperacion();
+    }
+
+    const contrasenaEncriptada = await bcrypt.hash(contrasena, 10);
+
+    await prisma.$transaction(async (transaccion) => {
+        const tokenConsumido = await transaccion.recuperacionContrasena.deleteMany({
+            where: {
+                id: recuperacion.id,
+                venceEn: { gt: ahora }
+            }
+        });
+
+        if (tokenConsumido.count !== 1) {
+            throw crearErrorTokenRecuperacion();
+        }
+
+        await transaccion.usuario.update({
+            where: { id: recuperacion.usuarioId },
+            data: { contrasena: contrasenaEncriptada }
+        });
+    });
+}
+
 async function obtenerPerfilUsuario(usuarioId) {
     const usuario = await prisma.usuario.findUnique({
         where: { id: usuarioId },
@@ -115,4 +197,10 @@ async function obtenerPerfilUsuario(usuarioId) {
     };
 }
 
-module.exports = { registrarUsuario, iniciarSesion, obtenerPerfilUsuario };
+module.exports = {
+    registrarUsuario,
+    iniciarSesion,
+    solicitarRecuperacionContrasena,
+    restablecerContrasena,
+    obtenerPerfilUsuario
+};

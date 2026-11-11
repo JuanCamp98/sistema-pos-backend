@@ -41,6 +41,26 @@ async function iniciarSesion(req, res, next) {
     }
 }
 
+async function solicitarRecuperacion(req, res, next) {
+    try {
+        await usuarioService.solicitarRecuperacionContrasena(req.body.email);
+        res.status(200).json({
+            mensaje: "Si el correo está asociado a una cuenta, recibirás instrucciones para restablecer tu contraseña."
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function restablecerContrasena(req, res, next) {
+    try {
+        await usuarioService.restablecerContrasena(req.body.token, req.body.contrasena);
+        res.status(200).json({ mensaje: "La contraseña se restableció correctamente." });
+    } catch (error) {
+        next(error);
+    }
+}
+
 async function obtenerPerfil(req, res, next) {
     try {
         const usuario = await usuarioService.obtenerPerfilUsuario(req.usuario.id);
@@ -50,4 +70,10 @@ async function obtenerPerfil(req, res, next) {
     }
 }
 
-module.exports = { registrar, iniciarSesion, obtenerPerfil };
+module.exports = {
+    registrar,
+    iniciarSesion,
+    solicitarRecuperacion,
+    restablecerContrasena,
+    obtenerPerfil
+};

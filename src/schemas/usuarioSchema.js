@@ -16,4 +16,19 @@ const loginSchema = z.object({
     contrasena: z.string().min(1, "La contrasena es obligatoria")
 });
 
-module.exports = { registroSchema, publicRegistroSchema, loginSchema };
+const solicitarRecuperacionSchema = z.object({
+    email: z.string().trim().email("El email no es valido")
+});
+
+const restablecerContrasenaSchema = z.object({
+    token: z.string().min(1, "El token es obligatorio").max(128),
+    contrasena: z.string().min(6, "La contrasena debe tener al menos 6 caracteres")
+});
+
+module.exports = {
+    registroSchema,
+    publicRegistroSchema,
+    loginSchema,
+    solicitarRecuperacionSchema,
+    restablecerContrasenaSchema
+};
