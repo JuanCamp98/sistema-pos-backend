@@ -80,6 +80,33 @@ async function listarStock(pagina, limite) {
     };
 }
 
+async function listarStockParaReporte(soloStockBajo = false) {
+    const productos = await prisma.producto.findMany({
+        where: { activo: true },
+        select: {
+            nombre: true,
+            precio: true,
+            stock: true,
+            stockReservado: true,
+            categoriaRelacion: { select: { nombre: true } },
+            tipoProducto: { select: { nombre: true } }
+        },
+        orderBy: { nombre: "asc" }
+    });
+
+    return productos
+        .map((producto) => ({
+            nombre: producto.nombre,
+            categoria: producto.categoriaRelacion.nombre,
+            tipoProducto: producto.tipoProducto.nombre,
+            precio: producto.precio,
+            stock: producto.stock,
+            stockReservado: producto.stockReservado,
+            stockDisponible: producto.stock - producto.stockReservado
+        }))
+        .filter((producto) => !soloStockBajo || producto.stockDisponible <= 5);
+}
+
 async function listarHistorialMovimientos(filtros) {
     const { skip, take, page, limit } = calcularPaginacion(filtros.page, filtros.limit);
     const { productoId, tipo, motivo, desde, hasta } = filtros;
@@ -137,6 +164,7 @@ module.exports = {
     registrarMovimiento,
     listarMovimientos,
     listarStock,
+    listarStockParaReporte,
     listarHistorialMovimientos,
     listarMovimientosPorProducto,
     ajustarStock
