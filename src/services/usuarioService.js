@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
 const mailService = require("./mailService");
+const { validarFormatoDni, obtenerVariantesDni } = require("../utils/dni");
 
 const DURACION_TOKEN_RECUPERACION_MS = 60 * 60 * 1000;
 
@@ -197,10 +198,55 @@ async function obtenerPerfilUsuario(usuarioId) {
     };
 }
 
+async function obtenerClientePorDni(dni) {
+    if (!dni || typeof dni !== "string" || !dni.trim()) {
+        const error = new Error("El DNI es obligatorio");
+        error.status = 400;
+        throw error;
+    }
+
+    if (!validarFormatoDni(dni)) {
+        const error = new Error("El formato del DNI no es válido");
+        error.status = 400;
+        throw error;
+    }
+
+    const cliente = await prisma.usuario.findFirst({
+        where: {
+            OR: obtenerVariantesDni(dni).map((dniVariante) => ({ dni: dniVariante })),
+            rol: {
+                nombre: "Cliente"
+            }
+        },
+        select: {
+            id: true,
+            nombre: true,
+            apellido: true,
+            dni: true,
+            email: true
+        }
+    });
+
+    if (!cliente) {
+        const error = new Error("No se encontró ningún cliente con el DNI ingresado");
+        error.status = 404;
+        throw error;
+    }
+
+    return {
+        id: cliente.id,
+        nombre: cliente.nombre,
+        apellido: cliente.apellido,
+        dni: cliente.dni,
+        email: cliente.email
+    };
+}
+
 module.exports = {
     registrarUsuario,
     iniciarSesion,
     solicitarRecuperacionContrasena,
     restablecerContrasena,
-    obtenerPerfilUsuario
+    obtenerPerfilUsuario,
+    obtenerClientePorDni
 };

@@ -37,6 +37,7 @@ const registrarVentaSchema = z.object({
 });
 
 const clienteVentaDirectaSchema = z.object({
+    id: z.string().uuid("El id de cliente no es valido").optional(),
     nombre: z.string().trim().min(1, "El nombre del cliente no puede estar vacio").optional(),
     apellido: z.string().trim().min(1, "El apellido del cliente no puede estar vacio").optional(),
     dni: z.string().trim().min(1, "El DNI del cliente no puede estar vacio").optional(),
@@ -56,6 +57,7 @@ const ventaDirectaSchema = z.object({
     ).min(1, "La venta debe tener al menos un producto"),
     cliente: clienteVentaDirectaSchema,
     metodoPago: z.string().min(1).optional(),
+    efectivoRecibido: z.number().finite().optional(),
     cobrar: z.boolean().optional(),
     nombrePersonalizado: nombrePersonalizadoSchema.optional()
 }).refine(

@@ -1,5 +1,6 @@
 // Controlador de usuarios, conecta las rutas HTTP con el servicio
 const usuarioService = require("../services/usuarioService");
+const { consultarClientePorDniSchema } = require("../schemas/usuarioSchema");
 
 async function registrar(req, res, next) {
     try {
@@ -70,10 +71,28 @@ async function obtenerPerfil(req, res, next) {
     }
 }
 
+async function obtenerClientePorDni(req, res, next) {
+    try {
+        const resultado = consultarClientePorDniSchema.safeParse({ dni: req.params.dni });
+        if (!resultado.success) {
+            const errores = resultado.error.issues.map(function (issue) {
+                return issue.path.join(".") + ": " + issue.message;
+            });
+            return res.status(400).json({ mensaje: "Datos invalidos", errores });
+        }
+
+        const cliente = await usuarioService.obtenerClientePorDni(resultado.data.dni);
+        res.status(200).json({ cliente });
+    } catch (error) {
+        next(error);
+    }
+}
+
 module.exports = {
     registrar,
     iniciarSesion,
     solicitarRecuperacion,
     restablecerContrasena,
-    obtenerPerfil
+    obtenerPerfil,
+    obtenerClientePorDni
 };

@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { validarFormatoDni } = require("../utils/dni");
 
 const registroSchema = z.object({
     nombre: z.string().min(1, "El nombre es obligatorio"),
@@ -25,10 +26,21 @@ const restablecerContrasenaSchema = z.object({
     contrasena: z.string().min(6, "La contrasena debe tener al menos 6 caracteres")
 });
 
+const consultarClientePorDniSchema = z.object({
+    dni: z.string()
+        .trim()
+        .min(1, "El DNI es obligatorio")
+        .refine(
+            validarFormatoDni,
+            "El formato del DNI no es válido"
+        )
+});
+
 module.exports = {
     registroSchema,
     publicRegistroSchema,
     loginSchema,
     solicitarRecuperacionSchema,
-    restablecerContrasenaSchema
+    restablecerContrasenaSchema,
+    consultarClientePorDniSchema
 };
