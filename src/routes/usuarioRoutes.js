@@ -32,4 +32,12 @@ router.post(
 
 router.get("/perfil", verificarToken, usuarioController.obtenerPerfil);
 
+// GET /usuarios/dni/:dni: consulta de cliente por DNI para Cajero y Administrador
+router.get(
+    "/dni/:dni",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador"]),
+    usuarioController.obtenerClientePorDni
+);
+
 module.exports = router;

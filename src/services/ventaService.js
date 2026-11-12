@@ -6,6 +6,7 @@ const mercadoPagoQrService = require("./mercadoPagoQrService");
 const { calcularPaginacion, calcularTotalPaginas } = require("../utils/paginacion");
 const { calcularPrecioPromocional, calcularPromocionesCombo } = require("./promocionService");
 const { validarHorarioRetiro } = require("./retiroService");
+const { normalizarDni, validarFormatoDni, obtenerVariantesDni } = require("../utils/dni");
 
 function generarCodigoComprobante() {
     const fecha = new Date();
@@ -597,7 +598,54 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
 }
 
 async function registrarVentaDirecta(cajeroId, datos) {
-    const registro = await registrarVenta(cajeroId, datos, "RAPIDA");
+    let clienteIdParaVenta = null;
+    let clienteDatos = datos.cliente ? { ...datos.cliente } : null;
+
+    if (datos.cliente) {
+        let usuarioCliente = null;
+        if (datos.cliente.id) {
+            usuarioCliente = await prisma.usuario.findFirst({
+                where: { id: datos.cliente.id, rol: { nombre: "Cliente" } },
+                select: { id: true, nombre: true, apellido: true, dni: true, email: true }
+            });
+        } else if (datos.cliente.dni) {
+            const dniOriginal = String(datos.cliente.dni).trim();
+            if (!validarFormatoDni(dniOriginal)) {
+                throw new ErrorPersonalizado("El formato del DNI no es válido", 400);
+            }
+            usuarioCliente = await prisma.usuario.findFirst({
+                where: {
+                    OR: obtenerVariantesDni(dniOriginal).map((dniVariante) => ({ dni: dniVariante })),
+                    rol: { nombre: "Cliente" }
+                },
+                select: { id: true, nombre: true, apellido: true, dni: true, email: true }
+            });
+        }
+
+        if ((datos.cliente.id || datos.cliente.dni) && !usuarioCliente) {
+            throw new ErrorPersonalizado("No se encontró el cliente registrado seleccionado", 404);
+        }
+
+        if (usuarioCliente) {
+            if (datos.cliente.dni && normalizarDni(String(datos.cliente.dni)) !== normalizarDni(usuarioCliente.dni)) {
+                throw new ErrorPersonalizado("El DNI no corresponde al cliente seleccionado", 400);
+            }
+            clienteIdParaVenta = usuarioCliente.id;
+            clienteDatos = {
+                nombre: usuarioCliente.nombre,
+                apellido: usuarioCliente.apellido,
+                dni: usuarioCliente.dni,
+                email: usuarioCliente.email
+            };
+        }
+    }
+
+    const datosVenta = {
+        ...datos,
+        cliente: clienteDatos
+    };
+
+    const registro = await registrarVenta(clienteIdParaVenta, datosVenta, "RAPIDA");
     const { pago, ...venta } = registro;
 
     if (pago) {
@@ -609,7 +657,7 @@ async function registrarVentaDirecta(cajeroId, datos) {
     }
 
     if (datos.cobrar && datos.metodoPago) {
-        const resultadoCobro = await cobrarVenta(venta.id, datos.metodoPago);
+        const resultadoCobro = await cobrarVenta(venta.id, datos.metodoPago, datos.efectivoRecibido);
         return {
             venta: resultadoCobro.venta,
             correo: resultadoCobro.correo,
