@@ -36,11 +36,61 @@ const consultarClientePorDniSchema = z.object({
         )
 });
 
+// Solo se permiten los campos personales editables. El rol y el ID quedan
+// fuera del esquema para que no puedan modificarse desde el cuerpo del request.
+const actualizarPerfilSchema = z.object({
+    nombre: z.string()
+        .trim()
+        .min(1, "El nombre es obligatorio")
+        .max(100, "El nombre no puede superar los 100 caracteres")
+        .optional(),
+    apellido: z.string()
+        .trim()
+        .min(1, "El apellido es obligatorio")
+        .max(100, "El apellido no puede superar los 100 caracteres")
+        .optional(),
+    dni: z.string()
+        .trim()
+        .min(1, "El DNI es obligatorio")
+        .refine(validarFormatoDni, "El formato del DNI no es válido")
+        .optional(),
+    email: z.string()
+        .trim()
+        .min(1, "El email es obligatorio")
+        .email("El email no es valido")
+        .max(255, "El email no puede superar los 255 caracteres")
+        .optional()
+})
+    .strict()
+    .refine(
+        (datos) => Object.keys(datos).length > 0,
+        "Debés enviar al menos un dato para actualizar"
+    );
+
+const cambiarContrasenaSchema = z.object({
+    contrasenaActual: z.string()
+        .min(1, "La contrasena actual es obligatoria"),
+    contrasenaNueva: z.string()
+        .min(6, "La contrasena debe tener al menos 6 caracteres"),
+    confirmarContrasena: z.string()
+        .min(1, "Debes confirmar la nueva contrasena")
+})
+    .strict()
+    .refine(
+        (datos) => datos.contrasenaNueva === datos.confirmarContrasena,
+        {
+            message: "Las contrasenas no coinciden",
+            path: ["confirmarContrasena"]
+        }
+    );
+
 module.exports = {
     registroSchema,
     publicRegistroSchema,
     loginSchema,
     solicitarRecuperacionSchema,
     restablecerContrasenaSchema,
-    consultarClientePorDniSchema
+    consultarClientePorDniSchema,
+    actualizarPerfilSchema,
+    cambiarContrasenaSchema
 };

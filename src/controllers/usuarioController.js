@@ -71,6 +71,33 @@ async function obtenerPerfil(req, res, next) {
     }
 }
 
+async function actualizarPerfil(req, res, next) {
+    try {
+        // El ID siempre sale del token verificado, nunca del cuerpo del request.
+        const usuario = await usuarioService.actualizarPerfilUsuario(
+            req.usuario.id,
+            req.body
+        );
+        res.status(200).json({
+            mensaje: "Perfil actualizado correctamente",
+            usuario
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function cambiarContrasena(req, res, next) {
+    try {
+        await usuarioService.cambiarContrasenaUsuario(req.usuario.id, req.body);
+        res.status(200).json({
+            mensaje: "Contraseña actualizada correctamente"
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
 async function obtenerClientePorDni(req, res, next) {
     try {
         const resultado = consultarClientePorDniSchema.safeParse({ dni: req.params.dni });
@@ -94,5 +121,7 @@ module.exports = {
     solicitarRecuperacion,
     restablecerContrasena,
     obtenerPerfil,
+    actualizarPerfil,
+    cambiarContrasena,
     obtenerClientePorDni
 };
