@@ -198,6 +198,131 @@ async function obtenerPerfilUsuario(usuarioId) {
     };
 }
 
+async function actualizarPerfilUsuario(usuarioId, datos) {
+    const usuario = await prisma.usuario.findUnique({
+        where: { id: usuarioId },
+        select: { id: true }
+    });
+
+    if (!usuario) {
+        const error = new Error("Usuario no encontrado");
+        error.status = 404;
+        throw error;
+    }
+
+    // Lista blanca de campos editables. Aunque el esquema ya rechaza otros
+    // campos, se vuelve a filtrar aca para no depender de una sola capa.
+    const cambios = {};
+    ["nombre", "apellido", "dni", "email"].forEach(function (campo) {
+        if (datos[campo] !== undefined) {
+            cambios[campo] = datos[campo];
+        }
+    });
+
+    if (Object.keys(cambios).length === 0) {
+        const error = new Error("Debés enviar al menos un dato para actualizar");
+        error.status = 400;
+        throw error;
+    }
+
+    if (cambios.email) {
+        const emailEnUso = await prisma.usuario.findFirst({
+            where: {
+                id: { not: usuarioId },
+                email: { equals: cambios.email, mode: "insensitive" }
+            },
+            select: { id: true }
+        });
+
+        if (emailEnUso) {
+            const error = new Error("El email ya está en uso por otro usuario");
+            error.status = 409;
+            throw error;
+        }
+    }
+
+    if (cambios.dni) {
+        const dniEnUso = await prisma.usuario.findFirst({
+            where: {
+                id: { not: usuarioId },
+                dni: { in: obtenerVariantesDni(cambios.dni) }
+            },
+            select: { id: true }
+        });
+
+        if (dniEnUso) {
+            const error = new Error("El DNI ya está en uso por otro usuario");
+            error.status = 409;
+            throw error;
+        }
+    }
+
+    let usuarioActualizado;
+
+    try {
+        usuarioActualizado = await prisma.usuario.update({
+            where: { id: usuarioId },
+            data: cambios,
+            select: {
+                id: true,
+                nombre: true,
+                apellido: true,
+                dni: true,
+                email: true,
+                rol: { select: { nombre: true } }
+            }
+        });
+    } catch (error) {
+        // Protege ante una condicion de carrera contra los indices unicos.
+        if (error.code === "P2002") {
+            const errorConflicto = new Error("El email o el DNI ya están en uso por otro usuario");
+            errorConflicto.status = 409;
+            throw errorConflicto;
+        }
+        throw error;
+    }
+
+    return {
+        id: usuarioActualizado.id,
+        nombre: usuarioActualizado.nombre,
+        apellido: usuarioActualizado.apellido,
+        dni: usuarioActualizado.dni,
+        email: usuarioActualizado.email,
+        rol: usuarioActualizado.rol.nombre
+    };
+}
+
+async function cambiarContrasenaUsuario(usuarioId, datos) {
+    const usuario = await prisma.usuario.findUnique({
+        where: { id: usuarioId },
+        select: { id: true, contrasena: true }
+    });
+
+    if (!usuario) {
+        const error = new Error("Usuario no encontrado");
+        error.status = 404;
+        throw error;
+    }
+
+    const contrasenaActualValida = await bcrypt.compare(
+        datos.contrasenaActual,
+        usuario.contrasena
+    );
+
+    if (!contrasenaActualValida) {
+        const error = new Error("La contraseña actual no es correcta");
+        error.status = 400;
+        throw error;
+    }
+
+    const contrasenaEncriptada = await bcrypt.hash(datos.contrasenaNueva, 10);
+
+    await prisma.usuario.update({
+        where: { id: usuarioId },
+        data: { contrasena: contrasenaEncriptada }
+    });
+}
+
 async function obtenerClientePorDni(dni) {
     if (!dni || typeof dni !== "string" || !dni.trim()) {
         const error = new Error("El DNI es obligatorio");
@@ -248,5 +373,7 @@ module.exports = {
     solicitarRecuperacionContrasena,
     restablecerContrasena,
     obtenerPerfilUsuario,
+    actualizarPerfilUsuario,
+    cambiarContrasenaUsuario,
     obtenerClientePorDni
 };

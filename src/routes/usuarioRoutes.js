@@ -7,7 +7,9 @@ const {
     publicRegistroSchema,
     loginSchema,
     solicitarRecuperacionSchema,
-    restablecerContrasenaSchema
+    restablecerContrasenaSchema,
+    actualizarPerfilSchema,
+    cambiarContrasenaSchema
 } = require("../schemas/usuarioSchema");
 const router = express.Router();
 
@@ -31,6 +33,22 @@ router.post(
 );
 
 router.get("/perfil", verificarToken, usuarioController.obtenerPerfil);
+
+// El usuario autenticado solo puede actualizar su propio perfil. El ID se
+// obtiene del token y el esquema solo admite datos personales editables.
+router.put(
+    "/perfil",
+    verificarToken,
+    validar(actualizarPerfilSchema),
+    usuarioController.actualizarPerfil
+);
+
+router.put(
+    "/cambiar-contrasena",
+    verificarToken,
+    validar(cambiarContrasenaSchema),
+    usuarioController.cambiarContrasena
+);
 
 // GET /usuarios/dni/:dni: consulta de cliente por DNI para Cajero y Administrador
 router.get(
