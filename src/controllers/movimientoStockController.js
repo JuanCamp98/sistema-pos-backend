@@ -1,8 +1,10 @@
 const movimientoStockService = require("../services/movimientoStockService");
+const configuracionStockService = require("../services/configuracionStockService");
 const {
-    paginacionStockSchema,
+    listarStockSchema,
     historialMovimientosSchema,
-    productoIdParamSchema
+    productoIdParamSchema,
+    vistaPreviaStockSchema
 } = require("../schemas/movimientoStockSchema");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
@@ -15,16 +17,54 @@ async function registrar(req, res, next) {
         });
     } catch (error) { next(error); }
 }
-
+    
 async function listar(req, res, next) {
     try {
-        const resultadoPaginacion = paginacionStockSchema.safeParse(req.query);
-        if (!resultadoPaginacion.success) {
-            throw new ErrorPersonalizado("Los parametros page y limit deben ser enteros positivos", 400);
+        const resultadoFiltros = listarStockSchema.safeParse(req.query);
+        if (!resultadoFiltros.success) {
+            throw new ErrorPersonalizado("Los parametros de paginacion o filtros no son validos", 400);
         }
-        const { page, limit } = resultadoPaginacion.data;
-        const resultado = await movimientoStockService.listarStock(page, limit);
+        const { page, limit, bajo } = resultadoFiltros.data;
+        const resultado = await movimientoStockService.listarStock(page, limit, bajo);
         res.status(200).json(resultado);
+    } catch (error) { next(error); }
+}
+
+async function obtenerConfiguracion(req, res, next) {
+    try {
+        res.status(200).json({
+            configuracion: await configuracionStockService.obtenerConfiguracion()
+        });
+    } catch (error) { next(error); }
+}
+
+async function guardarConfiguracion(req, res, next) {
+    try {
+        res.status(200).json({
+            mensaje: "La configuración de stock bajo se guardó correctamente",
+            configuracion: await configuracionStockService.guardarConfiguracion(req.body)
+        });
+    } catch (error) { next(error); }
+}
+
+async function resumenStockBajo(req, res, next) {
+    try {
+        res.status(200).json(await movimientoStockService.obtenerResumenStockBajo());
+    } catch (error) { next(error); }
+}
+
+async function vistaPreviaStockBajo(req, res, next) {
+    try {
+        const resultado = vistaPreviaStockSchema.safeParse(req.query);
+        if (!resultado.success) {
+            throw new ErrorPersonalizado(
+                "El umbral debe ser un número entero mayor o igual a cero",
+                400
+            );
+        }
+        res.status(200).json(
+            await movimientoStockService.obtenerVistaPreviaStockBajo(resultado.data.umbral)
+        );
     } catch (error) { next(error); }
 }
 
@@ -60,4 +100,14 @@ async function listarPorProducto(req, res, next) {
     } catch (error) { next(error); }
 }
 
-module.exports = { registrar, listar, listarMovimientos, listarPorProducto, ajustar };
+module.exports = {
+    registrar,
+    listar,
+    obtenerConfiguracion,
+    guardarConfiguracion,
+    resumenStockBajo,
+    vistaPreviaStockBajo,
+    listarMovimientos,
+    listarPorProducto,
+    ajustar
+};

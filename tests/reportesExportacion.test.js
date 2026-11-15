@@ -8,9 +8,15 @@ const app = require("../src/app");
 const prisma = require("../src/config/prisma");
 const ventaService = require("../src/services/ventaService");
 const movimientoStockService = require("../src/services/movimientoStockService");
+const configuracionStockService = require("../src/services/configuracionStockService");
 
 const listarVentasOriginal = ventaService.listarVentasParaReporte;
 const listarStockOriginal = movimientoStockService.listarStockParaReporte;
+const obtenerUmbralOriginal = configuracionStockService.obtenerUmbralStockBajo;
+
+// Los reportes usan el umbral configurado; en esta prueba se fija en 5 para
+// que el resultado no dependa de la configuración real de la base de datos.
+configuracionStockService.obtenerUmbralStockBajo = async () => 5;
 const ventas = Array.from({ length: 125 }, (_, indice) => ({
     codigoComprobante: `COMP-${String(indice + 1).padStart(4, "0")}`,
     fecha: new Date("2026-05-04T15:30:00.000Z"),
@@ -99,6 +105,7 @@ test("las consultas de reporte respetan filtros y recuperan todas las filas sin 
 after(async () => {
     ventaService.listarVentasParaReporte = listarVentasOriginal;
     movimientoStockService.listarStockParaReporte = listarStockOriginal;
+    configuracionStockService.obtenerUmbralStockBajo = obtenerUmbralOriginal;
     if (server) {
         await new Promise((resolve, reject) => {
             server.close((error) => error ? reject(error) : resolve());

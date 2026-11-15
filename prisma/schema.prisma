@@ -199,9 +199,19 @@ model Venta {
 model ConfiguracionRetiro {
   id              Int      @id @default(1)
   configuracion   Json
-  actualizadoEn   DateTime @updatedAt @map("actualizado_en")
+  actualizadoEn   DateTime @default(now()) @updatedAt @map("actualizado_en")
 
   @@map("configuracion_retiro")
+}
+
+// Configuracion persistente de las alertas de inventario.
+// Es un registro unico (id = 1) para que el umbral sea el mismo para todo el sistema.
+model ConfiguracionStock {
+  id              Int      @id @default(1)
+  umbralStockBajo Int      @default(5) @map("umbral_stock_bajo")
+  actualizadoEn   DateTime @updatedAt @map("actualizado_en")
+
+  @@map("configuracion_stock")
 }
 
 model Notificacion {
