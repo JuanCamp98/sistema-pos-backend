@@ -2,6 +2,7 @@ const ExcelJS = require("exceljs");
 const PDFDocument = require("pdfkit");
 const ventaService = require("./ventaService");
 const movimientoStockService = require("./movimientoStockService");
+const configuracionStockService = require("./configuracionStockService");
 
 const FORMATO_MONEDA = new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -102,7 +103,8 @@ async function generarExcelVentas(filtros) {
 }
 
 async function generarExcelStock(soloStockBajo) {
-    const productos = await movimientoStockService.listarStockParaReporte(soloStockBajo);
+    const umbralStockBajo = await configuracionStockService.obtenerUmbralStockBajo();
+    const productos = await movimientoStockService.listarStockParaReporte(soloStockBajo, umbralStockBajo);
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Sistema POS";
     workbook.created = new Date();
@@ -303,7 +305,8 @@ async function generarPdfVentas(filtros) {
 }
 
 async function generarPdfStock(soloStockBajo) {
-    const productos = await movimientoStockService.listarStockParaReporte(soloStockBajo);
+    const umbralStockBajo = await configuracionStockService.obtenerUmbralStockBajo();
+    const productos = await movimientoStockService.listarStockParaReporte(soloStockBajo, umbralStockBajo);
     const totales = productos.reduce((acumulado, producto) => ({
         fisico: acumulado.fisico + producto.stock,
         reservado: acumulado.reservado + producto.stockReservado,
@@ -312,7 +315,7 @@ async function generarPdfStock(soloStockBajo) {
 
     return generarPdf(
         "Reporte de stock",
-        { bajo: soloStockBajo ? "Stock bajo (disponible <= 5)" : null },
+        { bajo: soloStockBajo ? `Stock bajo (disponible <= ${umbralStockBajo})` : null },
         [
             { titulo: "Producto", ancho: 160 },
             { titulo: "Categoría", ancho: 124 },
