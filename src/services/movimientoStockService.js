@@ -9,6 +9,7 @@ const CAMPOS_STOCK = {
     id: true,
     nombre: true,
     imagen: true,
+    precio: true,
     categoriaRelacion: { select: { nombre: true } },
     stock: true,
     stockReservado: true
@@ -49,19 +50,41 @@ async function registrarMovimiento(datos) {
         );
     }
 
-    const nuevoStock = tipo === "ENTRADA"
-        ? producto.stock + cantidad
-        : producto.stock - cantidad;
-
     const resultado = await prisma.$transaction(async (tx) => {
-        const movimiento = await tx.movimientoStock.create({
+        // Actualizacion atomica: evita perder ajustes concurrentes y valida el
+        // disponible real en la misma sentencia para las salidas.
+        const filasAfectadas = tipo === "ENTRADA"
+            ? await tx.$executeRaw`
+                UPDATE "productos"
+                SET "stock" = "stock" + ${cantidad}
+                WHERE "id" = ${productoId} AND "activo" = true
+            `
+            : await tx.$executeRaw`
+                UPDATE "productos"
+                SET "stock" = "stock" - ${cantidad}
+                WHERE "id" = ${productoId}
+                  AND "activo" = true
+                  AND ("stock" - "stock_reservado") >= ${cantidad}
+            `;
+
+        if (filasAfectadas !== 1) {
+            const actual = await tx.producto.findUnique({
+                where: { id: productoId },
+                select: { activo: true, stock: true, stockReservado: true }
+            });
+            if (!actual || !actual.activo) {
+                throw new ErrorPersonalizado("Producto no encontrado", 404);
+            }
+            throw new ErrorPersonalizado(
+                "Stock insuficiente para realizar la salida (disponible: " +
+                Math.max(0, actual.stock - actual.stockReservado) + ")",
+                400
+            );
+        }
+
+        return tx.movimientoStock.create({
             data: { productoId, tipo, motivo, cantidad, referenciaId }
         });
-        await tx.producto.update({
-            where: { id: productoId },
-            data: { stock: nuevoStock }
-        });
-        return movimiento;
     });
 
     return resultado;
@@ -71,37 +94,56 @@ async function listarMovimientos(pagina, limite) {
     return listarHistorialMovimientos({ page: pagina, limit: limite });
 }
 
-async function listarStock(pagina, limite, soloStockBajo = false) {
+function coincideEstadoStock(producto, estado, umbralStockBajo) {
+    if (!estado || estado === "todos") return true;
+    if (estado === "sin-stock") return producto.stockDisponible <= 0;
+    if (estado === "stock-bajo") {
+        return producto.stockDisponible > 0 && producto.stockDisponible <= umbralStockBajo;
+    }
+    if (estado === "en-stock") return producto.stockDisponible > umbralStockBajo;
+    return true;
+}
+
+async function listarStock(pagina, limite, filtros = {}) {
+    // Compatibilidad con la firma anterior listarStock(page, limit, soloStockBajo).
+    const opciones = typeof filtros === "boolean" ? { bajo: filtros } : (filtros || {});
+    const { bajo = false, buscar, categoria, estado } = opciones;
     const { skip, take, page, limit } = calcularPaginacion(pagina, limite);
     const umbralStockBajo = await configuracionStockService.obtenerUmbralStockBajo();
 
-    // El stock disponible depende de dos columnas, por lo que el filtro se aplica
-    // sobre los productos activos antes de paginar para no romper el total.
-    if (soloStockBajo) {
+    const where = {
+        activo: true,
+        ...(buscar ? { nombre: { contains: buscar, mode: "insensitive" } } : {}),
+        ...(categoria ? {
+            categoriaRelacion: { nombre: { equals: categoria, mode: "insensitive" } }
+        } : {})
+    };
+
+    // `bajo` y `estado` dependen del stock disponible (dos columnas), por lo que
+    // se resuelven en memoria antes de paginar para no romper el total.
+    const requiereFiltroEnMemoria = Boolean(bajo) || Boolean(estado && estado !== "todos");
+    if (requiereFiltroEnMemoria) {
         const productos = await prisma.producto.findMany({
-            where: { activo: true },
+            where,
             select: CAMPOS_STOCK,
             orderBy: { nombre: "asc" }
         });
-        return paginarProductosStock(
-            productos.map((producto) => presentarProductoStock(producto, umbralStockBajo))
-                .filter((producto) => producto.stockBajo),
-            skip,
-            take,
-            page,
-            limit
-        );
+        const filtrados = productos
+            .map((producto) => presentarProductoStock(producto, umbralStockBajo))
+            .filter((producto) => !bajo || producto.stockBajo)
+            .filter((producto) => coincideEstadoStock(producto, estado, umbralStockBajo));
+        return paginarProductosStock(filtrados, skip, take, page, limit);
     }
 
     const [productos, total] = await prisma.$transaction([
         prisma.producto.findMany({
-            where: { activo: true },
+            where,
             select: CAMPOS_STOCK,
             orderBy: { nombre: "asc" },
             skip: skip,
             take: take
         }),
-        prisma.producto.count({ where: { activo: true } })
+        prisma.producto.count({ where })
     ]);
 
     return {
@@ -178,6 +220,42 @@ async function obtenerResumenStockBajo() {
         totalProductosActivos,
         totalProductosStockBajo: productosStockBajo.length,
         productosStockBajo
+    };
+}
+
+async function obtenerResumenInventario() {
+    const umbralStockBajo = await configuracionStockService.obtenerUmbralStockBajo();
+    const [productos, categorias] = await prisma.$transaction([
+        prisma.producto.findMany({
+            where: { activo: true },
+            select: {
+                stock: true,
+                stockReservado: true
+            }
+        }),
+        // Se cuentan todas las categorias activas para que el indicador suba
+        // tambien cuando se crea una categoria sin productos todavia.
+        prisma.categoria.count({ where: { activo: true } })
+    ]);
+
+    let stockBajo = 0;
+    let sinStock = 0;
+
+    productos.forEach((producto) => {
+        const stockDisponible = calcularStockDisponible(producto);
+        if (stockDisponible <= 0) {
+            sinStock += 1;
+        } else if (stockDisponible <= umbralStockBajo) {
+            stockBajo += 1;
+        }
+    });
+
+    return {
+        totalProductos: productos.length,
+        stockBajo,
+        sinStock,
+        categorias,
+        umbralStockBajo
     };
 }
 
@@ -270,6 +348,7 @@ module.exports = {
     listarStock,
     listarStockParaReporte,
     obtenerResumenStockBajo,
+    obtenerResumenInventario,
     obtenerVistaPreviaStockBajo,
     listarHistorialMovimientos,
     listarMovimientosPorProducto,

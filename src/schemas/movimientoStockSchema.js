@@ -26,7 +26,12 @@ const paginacionStockSchema = z.object({
 const listarStockSchema = paginacionStockSchema.extend({
     bajo: z.enum(["true", "false"])
         .optional()
-        .transform((valor) => valor === "true")
+        .transform((valor) => valor === "true"),
+    buscar: z.string().trim().max(100, "La busqueda es demasiado larga").optional(),
+    categoria: z.string().trim().max(100, "La categoria es demasiado larga").optional(),
+    estado: z.enum(["todos", "en-stock", "stock-bajo", "sin-stock"], {
+        errorMap: () => ({ message: "El estado de stock no es valido" })
+    }).optional()
 });
 
 const configuracionStockSchema = z.object({

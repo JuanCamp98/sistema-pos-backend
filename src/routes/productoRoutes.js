@@ -2,14 +2,16 @@ const express = require("express");
 const productoController = require("../controllers/productoController");
 const verificarToken = require("../middlewares/verificarToken");
 const verificarRol = require("../middlewares/verificarRol");
+const intentarAutenticar = require("../middlewares/intentarAutenticar");
 const validar = require("../middlewares/validar");
 const subirImagenProducto = require("../middlewares/subirImagenProducto");
 const { productoSchema, actualizarProductoSchema } = require("../schemas/productoSchema");
 const router = express.Router();
 
-// GET publico para que el cliente anonimo pueda ver el catalogo.
-router.get("/", productoController.listar);
-router.get("/:id", productoController.obtenerPorId);
+// GET publico para que el cliente anonimo pueda ver el catalogo. Si hay sesion de
+// Administrador o Cajero se devuelve la informacion completa de stock.
+router.get("/", intentarAutenticar, productoController.listar);
+router.get("/:id", intentarAutenticar, productoController.obtenerPorId);
 
 // CRUD solo para Administrador.
 router.post("/", verificarToken, verificarRol(["Administrador"]), subirImagenProducto, prepararDatosFormulario, validar(productoSchema), productoController.crear);

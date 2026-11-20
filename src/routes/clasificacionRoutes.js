@@ -8,11 +8,12 @@ const { crearControlador } = require("../controllers/clasificacionController");
 function crearRutas(tipo) {
     const router = express.Router();
     const controller = crearControlador(tipo);
-    router.use(verificarToken, verificarRol(["Administrador"]));
+    // Solo se listan opciones activas, necesarias para el catalogo publico.
     router.get("/", controller.listar);
-    router.post("/", validar(nombreClasificacionSchema), controller.crear);
-    router.put("/:id", validar(nombreClasificacionSchema), controller.actualizar);
-    router.delete("/:id", controller.desactivar);
+    // Crear, actualizar y desactivar sigue reservado a Administrador.
+    router.post("/", verificarToken, verificarRol(["Administrador"]), validar(nombreClasificacionSchema), controller.crear);
+    router.put("/:id", verificarToken, verificarRol(["Administrador"]), validar(nombreClasificacionSchema), controller.actualizar);
+    router.delete("/:id", verificarToken, verificarRol(["Administrador"]), controller.desactivar);
     return router;
 }
 

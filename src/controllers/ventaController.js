@@ -4,9 +4,21 @@ const { listarVentasQuerySchema } = require("../schemas/ventaSchema");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
 function verificarAccesoVenta(usuario, venta) {
-    if (usuario?.rol === "Cliente" && venta.usuarioId !== usuario.id) {
-        throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
-    }
+    if (usuario && ["Administrador", "Cajero"].includes(usuario.rol)) return;
+    if (usuario?.rol === "Cliente" && venta.usuarioId === usuario.id) return;
+    throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
+}
+
+function obtenerTokenAcceso(req) {
+    const token = req.get("x-token-comprobante");
+    return typeof token === "string" && token.trim().length > 0 ? token.trim() : null;
+}
+
+function obtenerAutorizacion(req) {
+    return {
+        usuario: req.usuario || null,
+        tokenAcceso: obtenerTokenAcceso(req)
+    };
 }
 
 async function registrar(req, res, next) {
@@ -62,7 +74,10 @@ async function cobrar(req, res, next) {
 
 async function cancelar(req, res, next) {
     try {
-        const ventaCancelada = await ventaService.cancelarVenta(req.params.id);
+        const ventaCancelada = await ventaService.cancelarVenta(
+            req.params.id,
+            obtenerAutorizacion(req)
+        );
         res.status(200).json({
             mensaje: "Venta cancelada correctamente",
             venta: ventaCancelada
@@ -148,8 +163,11 @@ async function descargarComprobantePdf(req, res, next) {
 
 async function descargarComprobantePdfPorCodigo(req, res, next) {
     try {
-        const venta = await ventaService.obtenerVentaPorCodigoComprobante(req.params.codigo);
-        await enviarComprobantePdf(res, venta, "no-store");
+        const venta = await ventaService.obtenerVentaPorCodigoComprobante(
+            req.params.codigo,
+            obtenerAutorizacion(req)
+        );
+        await enviarComprobantePdf(res, venta, "private, no-store");
     } catch (error) { next(error); }
 }
 
@@ -168,7 +186,10 @@ async function enviarComprobantePdf(res, venta, cacheControl) {
 
 async function buscarPorComprobante(req, res, next) {
     try {
-        const venta = await ventaService.obtenerVentaPorCodigoComprobante(req.params.codigo);
+        const venta = await ventaService.obtenerVentaPorCodigoComprobante(
+            req.params.codigo,
+            obtenerAutorizacion(req)
+        );
         res.status(200).json({ venta: venta });
     } catch (error) { next(error); }
 }

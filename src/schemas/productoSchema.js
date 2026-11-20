@@ -1,6 +1,6 @@
 const { z } = require("zod");
 
-const imagenSchema = z.string().trim().min(1).refine((valor) => {
+const imagenSchema = z.string().trim().min(1).max(5000, "La ruta de imagen es demasiado larga").refine((valor) => {
     try {
         const url = new URL(valor);
         return url.protocol === "http:" || url.protocol === "https:";
@@ -14,16 +14,26 @@ const imagenSchema = z.string().trim().min(1).refine((valor) => {
 }, "La imagen debe ser una URL HTTP(S) o una ruta relativa");
 
 const productoSchema = z.object({
-    nombre: z.string().min(1, "El nombre es obligatorio"),
-    descripcion: z.string().trim().optional(),
+    nombre: z.string()
+        .trim()
+        .min(1, "El nombre es obligatorio")
+        .max(150, "El nombre no puede superar los 150 caracteres"),
+    descripcion: z.string()
+        .trim()
+        .max(2000, "La descripción no puede superar los 2000 caracteres")
+        .optional(),
     imagen: imagenSchema.nullable().optional(),
-    precio: z.number().positive("El precio debe ser mayor a cero"),
+    precio: z.number()
+        .positive("El precio debe ser mayor a cero")
+        .max(99999999.99, "El precio supera el máximo permitido"),
     stock: z.number().int().min(0, "El stock no puede ser negativo"),
-    categoriaId: z.string().min(1, "El id de categoria es obligatorio"),
-    tipoProductoId: z.string().min(1, "El id de tipo de producto es obligatorio")
+    categoriaId: z.string().min(1, "El id de categoria es obligatorio").max(64),
+    tipoProductoId: z.string().min(1, "El id de tipo de producto es obligatorio").max(64)
 });
 
-const actualizarProductoSchema = productoSchema.partial().refine(
+// El stock solo se modifica mediante movimientos de inventario. En la
+// actualizacion se omite para no pisar el valor sin dejar historial.
+const actualizarProductoSchema = productoSchema.omit({ stock: true }).partial().refine(
     (datos) => Object.keys(datos).length > 0,
     { message: "Debe enviar al menos un campo para actualizar" }
 );

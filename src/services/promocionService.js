@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
+const { normalizarNombre } = require("../utils/nombres");
 
 function aCentavos(valor) {
     const coincidencia = String(valor).match(/^(\d+)(?:\.(\d+))?$/);
@@ -101,6 +102,33 @@ function presentarPromocion(promocion) {
     };
 }
 
+// DTO publico de promociones: los productos solo exponen los datos visibles en
+// el catalogo y la disponibilidad calculada, nunca el stock fisico ni el reservado.
+function presentarProductoPromocionPublica(producto) {
+    return {
+        id: producto.id,
+        nombre: producto.nombre,
+        imagen: producto.imagen ?? null,
+        precio: producto.precio,
+        disponible: Math.max(
+            0,
+            Number(producto.stock) - Number(producto.stockReservado || 0)
+        )
+    };
+}
+
+function presentarPromocionPublica(promocion) {
+    return {
+        ...promocion,
+        productos: promocion.productos?.map(function (item) {
+            return {
+                ...item,
+                producto: presentarProductoPromocionPublica(item.producto)
+            };
+        })
+    };
+}
+
 function datosBase(datos) {
     return {
         titulo: datos.titulo,
@@ -112,6 +140,46 @@ function datosBase(datos) {
         fechaFin: datos.fechaFin,
         activo: datos.activo
     };
+}
+
+// Normaliza las categorias de una promocion: recorta espacios, elimina las que
+// solo difieren en mayusculas y usa la grafia canonica de la categoria existente
+// para que el filtro coincida siempre.
+async function normalizarCategoriasPromocion(datos, db = prisma) {
+    if (datos.categorias === undefined) return datos;
+
+    const normalizadas = [];
+    const vistas = new Set();
+    for (const valor of datos.categorias || []) {
+        const nombre = normalizarNombre(valor);
+        if (!nombre) continue;
+        const clave = nombre.toLowerCase();
+        if (vistas.has(clave)) continue;
+        vistas.add(clave);
+        normalizadas.push(nombre);
+    }
+
+    if (normalizadas.length) {
+        const existentes = await db.categoria.findMany({
+            where: { nombre: { in: normalizadas, mode: "insensitive" } },
+            select: { nombre: true }
+        });
+        const canonicas = new Map(
+            existentes.map((categoria) => [categoria.nombre.toLowerCase(), categoria.nombre])
+        );
+        for (let indice = 0; indice < normalizadas.length; indice += 1) {
+            const canonica = canonicas.get(normalizadas[indice].toLowerCase());
+            if (canonica) normalizadas[indice] = canonica;
+        }
+    }
+
+    return { ...datos, categorias: normalizadas };
+}
+
+// Una promocion no debe repetir el mismo producto: la clave compuesta fallaria.
+function deduplicarProductoIds(datos) {
+    if (datos.productoIds === undefined) return datos;
+    return { ...datos, productoIds: [...new Set(datos.productoIds || [])] };
 }
 
 async function validarProductos(productoIds) {
@@ -148,7 +216,7 @@ async function validarPromocionContraMinimo(datos, db = prisma) {
     const condiciones = [];
     if (datos.productoIds?.length) condiciones.push({ id: { in: datos.productoIds } });
     if (datos.categorias?.length) {
-        condiciones.push({ categoriaRelacion: { nombre: { in: datos.categorias } } });
+        condiciones.push({ categoriaRelacion: { nombre: { in: datos.categorias, mode: "insensitive" } } });
     }
     if (condiciones.length === 0) return;
 
@@ -165,7 +233,7 @@ async function validarProductoContraPromociones(producto, db = prisma) {
     const ahora = new Date();
     const alcance = [];
     if (producto.id) alcance.push({ productos: { some: { productoId: producto.id } } });
-    if (producto.categoria) alcance.push({ categorias: { some: { categoria: producto.categoria } } });
+    if (producto.categoria) alcance.push({ categorias: { some: { categoria: { equals: producto.categoria, mode: "insensitive" } } } });
     if (alcance.length === 0) return;
 
     const promociones = await db.promocion.findMany({
@@ -229,14 +297,16 @@ async function obtenerPromocion(id) {
 }
 
 async function crearPromocion(datos) {
-    await validarDatosCombo(datos);
-    await validarPromocionContraMinimo(datos);
-    const promocion = await prisma.promocion.create({ data: { ...datosBase(datos), ...(await relaciones(datos)) }, include: incluirRelaciones });
+    const preparados = deduplicarProductoIds(await normalizarCategoriasPromocion(datos));
+    await validarDatosCombo(preparados);
+    await validarPromocionContraMinimo(preparados);
+    const promocion = await prisma.promocion.create({ data: { ...datosBase(preparados), ...(await relaciones(preparados)) }, include: incluirRelaciones });
     return presentarPromocion(promocion);
 }
 
 async function actualizarPromocion(id, datos) {
     const actual = await obtenerPromocion(id);
+    datos = deduplicarProductoIds(await normalizarCategoriasPromocion(datos));
     const fechaInicio = datos.fechaInicio || actual.fechaInicio;
     const fechaFin = datos.fechaFin || actual.fechaFin;
     if (fechaFin <= fechaInicio) throw new ErrorPersonalizado("La fecha de fin debe ser posterior a la fecha de inicio", 400);
@@ -319,7 +389,7 @@ async function listarPromocionesVigentes() {
             ...incluirRelaciones
         }
     });
-    return promociones.map(presentarPromocion);
+    return promociones.map(presentarPromocionPublica);
 }
 
 function calcularPrecioPromocionalConPromociones(precioProducto, cantidadProducto, promociones) {
@@ -550,7 +620,7 @@ async function calcularPrecioPromocional(db, producto) {
             fechaFin: { gte: new Date() },
             OR: [
                 { productos: { some: { productoId: producto.id } } },
-                { categorias: { some: { categoria: producto.categoria } } }
+                { categorias: { some: { categoria: { equals: producto.categoria, mode: "insensitive" } } } }
             ]
         },
         select: {

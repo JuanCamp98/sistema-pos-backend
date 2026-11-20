@@ -3,6 +3,12 @@ const imagenProductoService = require("../services/imagenProductoService");
 const { paginacionProductoSchema } = require("../schemas/productoSchema");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
 
+// El catalogo publico usa un DTO reducido. El personal interno (Administrador y
+// Cajero) sigue recibiendo los campos completos necesarios para gestionar stock.
+function esPersonalInterno(usuario) {
+    return Boolean(usuario && ["Administrador", "Cajero"].includes(usuario.rol));
+}
+
 async function crear(req, res, next) {
     let imagenGuardada;
     try {
@@ -36,14 +42,21 @@ async function listar(req, res, next) {
             throw new ErrorPersonalizado("Los parametros de paginacion o filtros no son validos", 400);
         }
         const { page, limit, nombre, categoria, categoriaId, tipoProductoId } = resultadoPaginacion.data;
-        const resultado = await productoService.listarProductos(page, limit, { nombre, categoria, categoriaId, tipoProductoId });
+        const resultado = await productoService.listarProductos(
+            page,
+            limit,
+            { nombre, categoria, categoriaId, tipoProductoId },
+            { publico: !esPersonalInterno(req.usuario) }
+        );
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
 
 async function obtenerPorId(req, res, next) {
     try {
-        const producto = await productoService.obtenerProductoPorId(req.params.id);
+        const producto = await productoService.obtenerProductoPorId(req.params.id, {
+            publico: !esPersonalInterno(req.usuario)
+        });
         res.status(200).json({ producto: producto });
     } catch (error) { next(error); }
 }

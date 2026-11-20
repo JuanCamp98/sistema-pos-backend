@@ -5,6 +5,7 @@ const intentarAutenticar = require("../middlewares/intentarAutenticar");
 const verificarWebhookMercadoPago = require("../middlewares/verificarWebhookMercadoPago");
 const verificarRol = require("../middlewares/verificarRol");
 const validar = require("../middlewares/validar");
+const { limitarPeticiones } = require("../middlewares/limitarPeticiones");
 const {
     registrarVentaSchema,
     ventaDirectaSchema,
@@ -15,10 +16,37 @@ const {
 } = require("../schemas/ventaSchema");
 const router = express.Router();
 
+const HORA_MS = 60 * 60 * 1000;
+
+// Evita usar el sistema de comprobantes para inundar de correos a un mismo
+// destinatario. Si la venta no informa email, el limite no se aplica.
+function claveDestinatario(req) {
+    const email = typeof req.body?.cliente?.email === "string"
+        ? req.body.cliente.email
+        : typeof req.body?.clienteEmail === "string"
+            ? req.body.clienteEmail
+            : "";
+    const normalizado = email.trim().toLowerCase();
+    return normalizado ? "comprobante|" + normalizado : null;
+}
+
+const limitarComprobantes = limitarPeticiones({
+    limite: 20,
+    ventanaMs: HORA_MS,
+    clave: claveDestinatario,
+    mensaje: "Se enviaron demasiados comprobantes a ese correo. Esperá unos minutos."
+});
+
 // POST /ventas: publico para cliente anonimo, pero si hay token lo usa.
 // El controller detecta si req.usuario existe para setear usuarioId.
 router.post(
     "/",
+    limitarPeticiones({
+        limite: 60,
+        ventanaMs: 10 * 60 * 1000,
+        mensaje: "Demasiadas compras en poco tiempo. Esperá unos minutos."
+    }),
+    limitarComprobantes,
     intentarAutenticar,
     validar(registrarVentaSchema),
     ventaController.registrar
@@ -28,6 +56,7 @@ router.post(
 // Permite registrar una venta directa de forma atómica desde el flujo de venta rápida.
 router.post(
     "/directa",
+    limitarComprobantes,
     verificarToken,
     verificarRol(["Cajero", "Administrador"]),
     validar(ventaDirectaSchema),
@@ -42,21 +71,27 @@ router.get(
     ventaController.listar
 );
 
-// GET /ventas/comprobante/:codigo: publico para reimprimir.
+// GET /ventas/comprobante/:codigo: requiere sesion propietaria o el token de
+// acceso entregado al comprador al confirmar la compra.
 // Va antes de /:id para que Express no matchee "comprobante" como id.
 router.get(
     "/comprobante/:codigo/pdf",
+    limitarPeticiones({ limite: 120, ventanaMs: 60 * 1000 }),
+    intentarAutenticar,
     ventaController.descargarComprobantePdfPorCodigo
 );
 
 router.get(
     "/comprobante/:codigo",
+    limitarPeticiones({ limite: 120, ventanaMs: 60 * 1000 }),
+    intentarAutenticar,
     ventaController.buscarPorComprobante
 );
 
 // Mercado Pago envía notificaciones sin sesión; el estado se verifica consultando su API.
 router.post(
     "/webhook/mercadopago",
+    limitarPeticiones({ limite: 120, ventanaMs: 60 * 1000 }),
     verificarWebhookMercadoPago,
     ventaController.webhookMercadoPago
 );
@@ -103,8 +138,8 @@ router.patch(
     ventaController.cobrar
 );
 
-// PATCH /ventas/:id/cancelar: cualquiera puede cancelar una PENDIENTE
-// (cliente anonimo con el id o usuario autenticado).
+// PATCH /ventas/:id/cancelar: Administrador/Cajero o el Cliente propietario.
+// Una compra anonima puede cancelarse presentando el token de su comprobante.
 router.patch(
     "/:id/cancelar",
     intentarAutenticar,

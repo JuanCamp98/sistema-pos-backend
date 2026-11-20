@@ -89,9 +89,11 @@ async function actualizarPerfil(req, res, next) {
 
 async function cambiarContrasena(req, res, next) {
     try {
-        await usuarioService.cambiarContrasenaUsuario(req.usuario.id, req.body);
+        const token = await usuarioService.cambiarContrasenaUsuario(req.usuario.id, req.body);
         res.status(200).json({
-            mensaje: "Contraseña actualizada correctamente"
+            mensaje: "Contraseña actualizada correctamente",
+            // Token renovado para conservar la sesion actual.
+            token
         });
     } catch (error) {
         next(error);

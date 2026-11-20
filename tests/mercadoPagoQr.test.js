@@ -5,6 +5,7 @@ const http = require("node:http");
 const jwt = require("jsonwebtoken");
 const app = require("../src/app");
 const prisma = require("../src/config/prisma");
+const { cabecerasWebhook } = require("./helpers/webhookMercadoPago");
 
 describe("Sincronización de órdenes QR de Mercado Pago", () => {
     let server;
@@ -28,6 +29,7 @@ describe("Sincronización de órdenes QR de Mercado Pago", () => {
                 headers: {
                     ...(opciones.body ? { "Content-Type": "application/json" } : {}),
                     ...(opciones.token ? { Authorization: "Bearer " + opciones.token } : {}),
+                    ...cabecerasWebhook(ruta, baseUrl),
                     ...(opciones.headers || {})
                 }
             }, (respuesta) => {

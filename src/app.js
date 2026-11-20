@@ -16,9 +16,47 @@ const reporteRoutes = require("./routes/reporteRoutes");
 
 const app = express();
 
-// Middlewares globales
-app.use(cors());
-app.use(express.json());
+// No revelar la tecnologia del servidor en las respuestas.
+app.disable("x-powered-by");
+
+// Cabeceras de seguridad basicas. No se agrega una CSP porque el frontend se
+// sirve por separado y este backend solo devuelve JSON, archivos y PDFs.
+app.use(function (req, res, next) {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+    if (process.env.NODE_ENV === "production") {
+        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    next();
+});
+
+const origenesPermitidos = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || "")
+    .split(",")
+    .map(function (origen) { return origen.trim(); })
+    .filter(Boolean);
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Sin encabezado Origin no es una peticion cross-origin del navegador
+        // (curl, tests, apps moviles). Se permite.
+        if (!origin) return callback(null, true);
+        if (origenesPermitidos.includes(origin)) return callback(null, true);
+        // En desarrollo, si no hay origenes configurados, se mantiene abierto
+        // para no bloquear el frontend local. En produccion se rechaza.
+        if (origenesPermitidos.length === 0 && process.env.NODE_ENV !== "production") {
+            return callback(null, true);
+        }
+        return callback(null, false);
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-token-comprobante"],
+    maxAge: 86400
+}));
+
+app.use(express.json({ limit: "1mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 // Ruta de prueba

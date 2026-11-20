@@ -6,6 +6,7 @@ const http = require("node:http");
 const jwt = require("jsonwebtoken");
 const app = require("../src/app");
 const prisma = require("../src/config/prisma");
+const { cabecerasWebhook } = require("./helpers/webhookMercadoPago");
 
 describe("Cancelación de compras propias por clientes", () => {
     let server;
@@ -32,7 +33,9 @@ describe("Cancelación de compras propias por clientes", () => {
                 method: opciones.method || "GET",
                 headers: {
                     ...(opciones.body ? { "Content-Type": "application/json" } : {}),
-                    ...(opciones.token ? { Authorization: "Bearer " + opciones.token } : {})
+                    ...(opciones.token ? { Authorization: "Bearer " + opciones.token } : {}),
+                    ...cabecerasWebhook(ruta, baseUrl),
+                    ...(opciones.headers || {})
                 }
             }, (respuesta) => {
                 const bloques = [];
