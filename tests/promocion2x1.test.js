@@ -102,10 +102,12 @@ describe("Promociones 2x1 y combo", () => {
         await new Promise((resolve) => server.listen(0, resolve));
         baseUrl = "http://127.0.0.1:" + server.address().port;
 
+        // El rol ya no se confia desde el token: el middleware lo resuelve
+        // contra la base, por eso el usuario debe tener el rol Administrador.
         const rol = await prisma.rol.upsert({
-            where: { nombre: "Cliente" },
+            where: { nombre: "Administrador" },
             update: {},
-            create: { nombre: "Cliente" }
+            create: { nombre: "Administrador" }
         });
         const marca = Date.now().toString();
         administrador = await prisma.usuario.create({

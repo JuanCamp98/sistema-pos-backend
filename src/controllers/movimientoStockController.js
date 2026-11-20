@@ -24,8 +24,13 @@ async function listar(req, res, next) {
         if (!resultadoFiltros.success) {
             throw new ErrorPersonalizado("Los parametros de paginacion o filtros no son validos", 400);
         }
-        const { page, limit, bajo } = resultadoFiltros.data;
-        const resultado = await movimientoStockService.listarStock(page, limit, bajo);
+        const { page, limit, bajo, buscar, categoria, estado } = resultadoFiltros.data;
+        const resultado = await movimientoStockService.listarStock(page, limit, {
+            bajo,
+            buscar,
+            categoria,
+            estado
+        });
         res.status(200).json(resultado);
     } catch (error) { next(error); }
 }
@@ -50,6 +55,13 @@ async function guardarConfiguracion(req, res, next) {
 async function resumenStockBajo(req, res, next) {
     try {
         res.status(200).json(await movimientoStockService.obtenerResumenStockBajo());
+    } catch (error) { next(error); }
+}
+
+async function resumenInventario(req, res, next) {
+    try {
+        res.set("Cache-Control", "no-store");
+        res.status(200).json(await movimientoStockService.obtenerResumenInventario());
     } catch (error) { next(error); }
 }
 
@@ -106,6 +118,7 @@ module.exports = {
     obtenerConfiguracion,
     guardarConfiguracion,
     resumenStockBajo,
+    resumenInventario,
     vistaPreviaStockBajo,
     listarMovimientos,
     listarPorProducto,

@@ -16,6 +16,16 @@ function obtenerDestinatario(venta) {
     return venta.clienteEmail || venta.usuario?.email || null;
 }
 
+function construirUrlComprobante(frontendUrl, venta) {
+    if (!frontendUrl) return null;
+    const base = `${frontendUrl.replace(/\/$/, "")}/comprobante/${encodeURIComponent(venta.codigoComprobante)}`;
+    // El token viaja en el fragmento (#) para que no quede en logs del servidor
+    // ni en el encabezado Referer. El frontend lo envia en un header al API.
+    return venta.tokenAcceso
+        ? `${base}#acceso=${encodeURIComponent(venta.tokenAcceso)}`
+        : base;
+}
+
 function crearContenido(venta) {
     const fecha = new Date(venta.fecha).toLocaleString("es-AR");
     const detalles = venta.detalles.map((detalle) => {
@@ -68,9 +78,7 @@ function crearContenidoHtml(venta, frontendUrl) {
             </tr>`;
     }).join("");
     const descuentos = venta.detalles.reduce((total, detalle) => total + Number(detalle.descuentoTotal || 0), 0);
-    const urlComprobante = frontendUrl
-        ? `${frontendUrl.replace(/\/$/, "")}/comprobante/${encodeURIComponent(venta.codigoComprobante)}`
-        : null;
+    const urlComprobante = construirUrlComprobante(frontendUrl, venta);
     const enlaceComprobante = urlComprobante
         ? `<a href="${escaparHtml(urlComprobante)}" style="display: inline-block; margin-top: 24px; padding: 13px 20px; background: #24543d; color: #ffffff; font-weight: 700; text-decoration: none;">Ver comprobante</a>`
         : "";
@@ -169,9 +177,7 @@ async function enviarAvisoPedidoListo(venta) {
         return { enviado: false, estado: "OMITIDO", motivo: "El servicio de correo no está configurado" };
     }
 
-    const urlComprobante = configuracion.frontendUrl
-        ? `${configuracion.frontendUrl.replace(/\/$/, "")}/comprobante/${encodeURIComponent(venta.codigoComprobante)}`
-        : null;
+    const urlComprobante = construirUrlComprobante(configuracion.frontendUrl, venta);
     const transportador = nodemailer.createTransport({
         host: configuracion.host,
         port: configuracion.port,
@@ -196,7 +202,9 @@ async function enviarCorreoRecuperacionContrasena(destinatario, token) {
         throw new Error("El servicio de correo o la URL del frontend no están configurados");
     }
 
-    const urlRecuperacion = `${configuracion.frontendUrl.replace(/\/$/, "")}/restablecer-contrasena?token=${encodeURIComponent(token)}`;
+    // El token viaja en el fragmento (#) para que no quede en logs de proxies,
+    // historial del navegador ni en el encabezado Referer.
+    const urlRecuperacion = `${configuracion.frontendUrl.replace(/\/$/, "")}/restablecer-contrasena#token=${encodeURIComponent(token)}`;
     const transportador = nodemailer.createTransport({
         host: configuracion.host,
         port: configuracion.port,

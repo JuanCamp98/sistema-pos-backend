@@ -51,7 +51,8 @@ npm install
 ```env
 PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:55432/template1?sslmode=disable
-JWT_SECRET=una_clave_secreta_cualquiera
+# Usar un valor aleatorio largo (>= 32 caracteres), por ejemplo: openssl rand -hex 32
+JWT_SECRET=reemplazar_por_un_secreto_largo_y_aleatorio
 ```
 
 5. Levantar la base de datos local en una terminal y dejarla abierta:
@@ -124,12 +125,26 @@ La venta rápida puede generar un QR dinámico en ARS. La venta permanece pendie
 ```env
 MP_ACCESS_TOKEN=TEST-...
 MP_QR_EXTERNAL_POS_ID=POS-001
+# Secreto de firma de webhooks (Panel de Mercado Pago > Webhooks).
+MP_WEBHOOK_SECRET=...
 ```
 
 4. Aplica las migraciones con `npx prisma migrate deploy` y regenera Prisma con `npx prisma generate`.
 5. En la aplicación de Developers, configura notificaciones para **Order (Mercado Pago)** con la URL `https://TU-DOMINIO/ventas/webhook/mercadopago`. Para desarrollo local, usa un túnel HTTPS y configura su URL pública.
-6. El webhook QR se usa como aviso y no como confirmación de pago: la API no requiere una firma HMAC para esta notificación QR. El backend acepta solo identificadores de orden con formato válido, busca una orden vinculada a una venta local y consulta la orden con el Access Token antes de actualizar la venta. No se actualizan ventas a partir del contenido enviado por el webhook.
+6. El webhook QR se usa como aviso y no como confirmación de pago. Si `MP_WEBHOOK_SECRET` está definido (recomendado), el backend exige la cabecera `x-signature` y valida la firma HMAC-SHA256 antes de procesar la notificación. Además, solo acepta identificadores de orden con formato válido, busca una orden vinculada a una venta local y consulta la orden con el Access Token antes de actualizar la venta. No se actualizan ventas a partir del contenido enviado por el webhook.
 7. El QR dinámico vence a los 15 minutos. El cliente y la caja vuelven a consultar la orden cada 10 segundos como respaldo si la notificación se demora o no llega. Solo `processed` confirma el pago; `expired` y `canceled` cancelan la venta pendiente, mientras que `refunded` queda registrado como reembolsada. `status_detail` también se conserva para diagnóstico.
+
+## Seguridad
+
+* Los JWT usan HS256, expiran a las 8 horas y se validan contra la base: el rol y la versión del token se leen del usuario, y cambiar o restablecer la contraseña invalida las sesiones anteriores. En producción el servidor no arranca si `JWT_SECRET` falta o tiene menos de 32 caracteres.
+* Rate limiting en memoria (`RATE_LIMIT_DISABLED=true` lo desactiva solo en desarrollo) para login, registro, recuperación de contraseña, compras y webhooks. El login y la recuperación se limitan por credencial y también por IP; el mapa de claves tiene un tope para no agotar la memoria.
+* Las contraseñas deben tener entre 8 y 72 caracteres (bcrypt trunca a 72 bytes).
+* Los esquemas acotan longitudes, cantidad de ítems por venta, cantidades y paginación, y validan el formato del DNI. Los emails se normalizan a minúsculas y se comparan sin distinguir mayúsculas para evitar cuentas duplicadas.
+* CORS restringido a `CORS_ORIGINS` o `FRONTEND_URL`, cabeceras de seguridad básicas y `x-powered-by` deshabilitado.
+* Las ventas anónimas pendientes vencen según `VENTA_PENDIENTE_TTL_MINUTOS` y liberan su stock; la limpieza corre cada `VENTA_PENDIENTE_LIMPIEZA_MINUTOS`.
+* El stock se ajusta de forma atómica y solo mediante movimientos de inventario, que quedan registrados con su historial.
+* `npm audit --omit=dev` no reporta vulnerabilidades en dependencias de producción. La única alerta restante es `minimatch` dentro de `nodemon` (dependencia de desarrollo); se acepta hasta que `nodemon` publique una versión compatible sin esa dependencia.
+* Para producción se asume HTTPS y, si hay un proxy inverso, configurar `trust proxy` en el servidor para que el rate limiting use la IP real. El frontend guarda la sesión en `localStorage`; agregar una CSP en el servidor que sirve el frontend es una mejora pendiente fuera de este backend.
 
 ## Estado Actual
 

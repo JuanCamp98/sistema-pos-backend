@@ -27,6 +27,9 @@ model Usuario {
   dni            String   @unique
   email         String   @unique
   contrasena    String
+  // Version del token JWT. Se incrementa al cambiar o restablecer la contrasena
+  // para invalidar las sesiones abiertas.
+  tokenVersion  Int      @default(0) @map("token_version")
   rolId         String   @map("rol_id")
   creadoEn      DateTime @default(now()) @map("creado_en")
   actualizadoEn DateTime @updatedAt @map("actualizado_en")
@@ -179,6 +182,10 @@ model Venta {
   clienteEmail      String?     @map("cliente_email")
   nombrePersonalizado String?   @map("nombre_personalizado") @db.VarChar(80)
   codigoComprobante String      @unique @map("codigo_comprobante")
+  // Token aleatorio que autoriza la consulta publica del comprobante sin sesion.
+  // Se entrega al comprador al confirmar la compra y no reemplaza la verificacion
+  // de propiedad para usuarios autenticados.
+  tokenAcceso       String?     @unique @map("token_acceso")
   estado            EstadoVenta @default(PENDIENTE)
   origen            OrigenVenta @default(AUTOGESTION)
   metodoPago        String?     @map("metodo_pago")

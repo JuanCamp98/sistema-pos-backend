@@ -8,25 +8,35 @@ const adaptador = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 
 const prisma = new PrismaClient({ adapter: adaptador });
 
-async function upsertRol(nombre) {
-    return prisma.rol.upsert({
-        where: { nombre: nombre },
-        update: {},
-        create: { nombre: nombre }
+const { normalizarNombre } = require("../src/utils/nombres");
+
+async function buscarPorNombre(modelo, nombre) {
+    return modelo.findFirst({
+        where: { nombre: { equals: nombre, mode: "insensitive" } }
     });
+}
+
+async function upsertRol(nombre) {
+    const nombreNormalizado = normalizarNombre(nombre);
+    const existente = await buscarPorNombre(prisma.rol, nombreNormalizado);
+    if (existente) return existente;
+    return prisma.rol.create({ data: { nombre: nombreNormalizado } });
 }
 
 async function upsertUsuario(nombre, apellido, dni, email, contrasena, rolNombre) {
     const rol = await upsertRol(rolNombre);
+    const emailNormalizado = String(email).trim().toLowerCase();
+    const existente = await prisma.usuario.findFirst({
+        where: { email: { equals: emailNormalizado, mode: "insensitive" } }
+    });
+    if (existente) return existente;
     const contrasenaEncriptada = await bcrypt.hash(contrasena, 10);
-    return prisma.usuario.upsert({
-        where: { email: email },
-        update: {},
-        create: {
+    return prisma.usuario.create({
+        data: {
             nombre: nombre,
             apellido: apellido,
             dni: dni,
-            email: email,
+            email: emailNormalizado,
             contrasena: contrasenaEncriptada,
             rolId: rol.id
         }
@@ -79,12 +89,16 @@ const PRODUCTOS_EJEMPLO = [
 ];
 
 async function upsertProducto(datos) {
-    const existente = await prisma.producto.findFirst({ where: { nombre: datos.nombre } });
+    const nombre = normalizarNombre(datos.nombre);
+    const existente = await buscarPorNombre(prisma.producto, nombre);
     if (existente) return existente;
-    const categoria = await prisma.categoria.upsert({ where: { nombre: datos.categoria }, update: {}, create: { nombre: datos.categoria } });
-    const tipoProducto = await prisma.tipoProducto.upsert({ where: { nombre: "General" }, update: {}, create: { nombre: "General" } });
+    const nombreCategoria = normalizarNombre(datos.categoria);
+    const categoria = await buscarPorNombre(prisma.categoria, nombreCategoria) ||
+        await prisma.categoria.create({ data: { nombre: nombreCategoria } });
+    const tipoProducto = await buscarPorNombre(prisma.tipoProducto, "General") ||
+        await prisma.tipoProducto.create({ data: { nombre: "General" } });
     const { categoria: _categoria, ...productoDatos } = datos;
-    return prisma.producto.create({ data: { ...productoDatos, categoriaId: categoria.id, tipoProductoId: tipoProducto.id } });
+    return prisma.producto.create({ data: { ...productoDatos, nombre, categoriaId: categoria.id, tipoProductoId: tipoProducto.id } });
 }
 
 async function main() {
@@ -93,9 +107,31 @@ async function main() {
     await upsertRol("Cajero");
     await upsertRol("Cliente");
 
+    const esProduccion = process.env.NODE_ENV === "production";
+    const contrasenaAdmin = process.env.SEED_ADMIN_PASSWORD;
+    const contrasenaCajero = process.env.SEED_CAJERO_PASSWORD;
+
+    if (esProduccion && (!contrasenaAdmin || !contrasenaCajero)) {
+        throw new Error("En produccion definí SEED_ADMIN_PASSWORD y SEED_CAJERO_PASSWORD antes de ejecutar el seed");
+    }
+
     // Usuarios de prueba
-    await upsertUsuario("Admin", "Principal", "30000000", "admin@pos.local", "admin123", "Administrador");
-    await upsertUsuario("Cajero", "Demo", "30000001", "cajero@pos.local", "cajero123", "Cajero");
+    await upsertUsuario(
+        "Admin",
+        "Principal",
+        "30000000",
+        "admin@pos.local",
+        contrasenaAdmin || "admin123",
+        "Administrador"
+    );
+    await upsertUsuario(
+        "Cajero",
+        "Demo",
+        "30000001",
+        "cajero@pos.local",
+        contrasenaCajero || "cajero123",
+        "Cajero"
+    );
 
     // Productos de ejemplo
     for (const producto of PRODUCTOS_EJEMPLO) {
@@ -104,8 +140,11 @@ async function main() {
 
     console.log("Seed cargado correctamente:");
     console.log("  - Roles: Administrador, Cajero, Cliente");
-    console.log("  - Usuarios: admin@pos.local / admin123, cajero@pos.local / cajero123");
+    console.log("  - Usuarios: admin@pos.local, cajero@pos.local");
     console.log("  - " + PRODUCTOS_EJEMPLO.length + " productos de ejemplo");
+    if (!contrasenaAdmin || !contrasenaCajero) {
+        console.warn("  - ATENCION: se usaron contrasenas por defecto. Cambialas antes de usar el sistema.");
+    }
 }
 
 main()

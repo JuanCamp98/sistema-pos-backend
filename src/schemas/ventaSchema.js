@@ -1,5 +1,10 @@
 const { z } = require("zod");
 const { retiroVentaSchema } = require("./retiroSchema");
+const { validarFormatoDni } = require("../utils/dni");
+
+const MAX_ITEMS_VENTA = 100;
+const MAX_CANTIDAD_ITEM = 9999;
+const MAX_MONTO = 99999999.99;
 
 const normalizarNombrePersonalizado = (nombre) => nombre
     .replace(/[\u0000-\u001F\u007F]/g, " ")
@@ -13,51 +18,94 @@ const nombrePersonalizadoSchema = z.string()
         .max(80, "El nombre de la compra no puede superar los 80 caracteres"));
 
 const clienteSchema = z.object({
-    nombre: z.string().min(1, "El nombre del cliente es obligatorio"),
-    apellido: z.string().min(1, "El apellido del cliente es obligatorio"),
-    dni: z.string().min(1, "El DNI del cliente es obligatorio"),
-    email: z.string().email("El email del cliente no es valido"),
-    confirmarEmail: z.string().email("La confirmacion de email no es valida")
+    nombre: z.string()
+        .trim()
+        .min(1, "El nombre del cliente es obligatorio")
+        .max(100, "El nombre del cliente no puede superar los 100 caracteres"),
+    apellido: z.string()
+        .trim()
+        .min(1, "El apellido del cliente es obligatorio")
+        .max(100, "El apellido del cliente no puede superar los 100 caracteres"),
+    dni: z.string()
+        .trim()
+        .min(1, "El DNI del cliente es obligatorio")
+        .max(20, "El DNI del cliente no es valido")
+        .refine(validarFormatoDni, "El formato del DNI no es válido"),
+    email: z.string()
+        .trim()
+        .toLowerCase()
+        .max(255, "El email del cliente no puede superar los 255 caracteres")
+        .email("El email del cliente no es valido"),
+    confirmarEmail: z.string()
+        .trim()
+        .toLowerCase()
+        .max(255, "La confirmacion de email no puede superar los 255 caracteres")
+        .email("La confirmacion de email no es valida")
 }).refine(
-    (cliente) => cliente.email.toLowerCase() === cliente.confirmarEmail.toLowerCase(),
+    (cliente) => cliente.email === cliente.confirmarEmail,
     { message: "Los emails no coinciden", path: ["confirmarEmail"] }
 );
 
+const itemVentaSchema = z.object({
+    productoId: z.string().uuid("El id de producto no es valido"),
+    cantidad: z.number()
+        .int()
+        .positive("La cantidad debe ser mayor a cero")
+        .max(MAX_CANTIDAD_ITEM, "La cantidad supera el máximo permitido")
+});
+
+const itemsVentaSchema = z.array(itemVentaSchema)
+    .min(1, "La venta debe tener al menos un producto")
+    .max(MAX_ITEMS_VENTA, "La venta no puede tener más de 100 productos distintos");
+
 const registrarVentaSchema = z.object({
-    items: z.array(
-        z.object({
-            productoId: z.string().uuid("El id de producto no es valido"),
-            cantidad: z.number().int().positive("La cantidad debe ser mayor a cero")
-        })
-    ).min(1, "La venta debe tener al menos un producto"),
+    items: itemsVentaSchema,
     cliente: clienteSchema.optional(),
-    metodoPago: z.string().min(1).optional(),
+    metodoPago: z.string().trim().min(1).max(50).optional(),
     retiro: retiroVentaSchema,
     nombrePersonalizado: nombrePersonalizadoSchema.optional()
 });
 
 const clienteVentaDirectaSchema = z.object({
     id: z.string().uuid("El id de cliente no es valido").optional(),
-    nombre: z.string().trim().min(1, "El nombre del cliente no puede estar vacio").optional(),
-    apellido: z.string().trim().min(1, "El apellido del cliente no puede estar vacio").optional(),
-    dni: z.string().trim().min(1, "El DNI del cliente no puede estar vacio").optional(),
-    email: z.string().email("El email del cliente no es valido").optional(),
-    confirmarEmail: z.string().email("La confirmacion de email no es valida").optional()
+    nombre: z.string()
+        .trim()
+        .min(1, "El nombre del cliente no puede estar vacio")
+        .max(100, "El nombre del cliente no puede superar los 100 caracteres")
+        .optional(),
+    apellido: z.string()
+        .trim()
+        .min(1, "El apellido del cliente no puede estar vacio")
+        .max(100, "El apellido del cliente no puede superar los 100 caracteres")
+        .optional(),
+    dni: z.string()
+        .trim()
+        .min(1, "El DNI del cliente no puede estar vacio")
+        .max(20, "El DNI del cliente no es valido")
+        .refine(validarFormatoDni, "El formato del DNI no es válido")
+        .optional(),
+    email: z.string()
+        .trim()
+        .toLowerCase()
+        .max(255, "El email del cliente no puede superar los 255 caracteres")
+        .email("El email del cliente no es valido")
+        .optional(),
+    confirmarEmail: z.string()
+        .trim()
+        .toLowerCase()
+        .max(255, "La confirmacion de email no puede superar los 255 caracteres")
+        .email("La confirmacion de email no es valida")
+        .optional()
 }).refine(
-    (cliente) => !cliente.confirmarEmail || (cliente.email && cliente.email.toLowerCase() === cliente.confirmarEmail.toLowerCase()),
+    (cliente) => !cliente.confirmarEmail || (cliente.email && cliente.email === cliente.confirmarEmail),
     { message: "Los emails no coinciden", path: ["confirmarEmail"] }
 ).optional();
 
 const ventaDirectaSchema = z.object({
-    items: z.array(
-        z.object({
-            productoId: z.string().uuid("El id de producto no es valido"),
-            cantidad: z.number().int().positive("La cantidad debe ser mayor a cero")
-        })
-    ).min(1, "La venta debe tener al menos un producto"),
+    items: itemsVentaSchema,
     cliente: clienteVentaDirectaSchema,
-    metodoPago: z.string().min(1).optional(),
-    efectivoRecibido: z.number().finite().optional(),
+    metodoPago: z.string().trim().min(1).max(50).optional(),
+    efectivoRecibido: z.number().finite().max(MAX_MONTO, "El efectivo recibido supera el máximo permitido").optional(),
     cobrar: z.boolean().optional(),
     nombrePersonalizado: nombrePersonalizadoSchema.optional()
 }).refine(
@@ -68,8 +116,8 @@ const ventaDirectaSchema = z.object({
 const cancelarVentaSchema = z.object({}).optional();
 
 const cobrarVentaSchema = z.object({
-    metodoPago: z.string().min(1, "El metodo de pago es obligatorio"),
-    efectivoRecibido: z.number().finite().optional()
+    metodoPago: z.string().trim().min(1, "El metodo de pago es obligatorio").max(50, "El metodo de pago no es valido"),
+    efectivoRecibido: z.number().finite().max(MAX_MONTO, "El efectivo recibido supera el máximo permitido").optional()
 }).superRefine((datos, contexto) => {
     if (datos.metodoPago !== "Efectivo") return;
 
@@ -93,10 +141,10 @@ const renombrarVentaSchema = z.object({
 }).strict();
 
 const listarVentasQuerySchema = z.object({
-    pagina: z.coerce.number().int().positive().optional(),
-    limite: z.coerce.number().int().positive().optional(),
-    page: z.coerce.number().int().positive().optional(),
-    limit: z.coerce.number().int().positive().optional(),
+    pagina: z.coerce.number().int().positive().max(100000).optional(),
+    limite: z.coerce.number().int().positive().max(100).optional(),
+    page: z.coerce.number().int().positive().max(100000).optional(),
+    limit: z.coerce.number().int().positive().max(100).optional(),
     estado: z.enum([
         "PENDIENTE",
         "COBRADA",

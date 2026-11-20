@@ -17,6 +17,7 @@ router.post("/", ...soloAdministrador, validar(registrarMovimientoSchema), movim
 router.get("/configuracion", ...soloAdministrador, movimientoStockController.obtenerConfiguracion);
 router.put("/configuracion", ...soloAdministrador, validar(configuracionStockSchema), movimientoStockController.guardarConfiguracion);
 router.get("/resumen", ...soloAdministrador, movimientoStockController.resumenStockBajo);
+router.get("/resumen-inventario", ...personalInterno, movimientoStockController.resumenInventario);
 router.get("/vista-previa", ...soloAdministrador, movimientoStockController.vistaPreviaStockBajo);
 
 router.get("/", ...personalInterno, movimientoStockController.listar);

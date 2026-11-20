@@ -51,6 +51,7 @@ let baseUrl;
 
 const findManyOriginal = prisma.producto.findMany;
 const countOriginal = prisma.producto.count;
+const countCategoriasOriginal = prisma.categoria.count;
 const transactionOriginal = prisma.$transaction;
 const obtenerUmbralOriginal = configuracionStockService.obtenerUmbralStockBajo;
 
@@ -90,6 +91,7 @@ describe("Alerta de stock bajo", () => {
             return datos.map((item) => ({ ...item }));
         };
         prisma.producto.count = async (consulta = {}) => activosConsulta(consulta.where).length;
+        prisma.categoria.count = async () => 1;
         prisma.$transaction = async (operaciones) => Promise.all(operaciones);
 
         server = http.createServer(app);
@@ -101,6 +103,7 @@ describe("Alerta de stock bajo", () => {
         configuracionStockService.obtenerUmbralStockBajo = obtenerUmbralOriginal;
         prisma.producto.findMany = findManyOriginal;
         prisma.producto.count = countOriginal;
+        prisma.categoria.count = countCategoriasOriginal;
         prisma.$transaction = transactionOriginal;
         if (server) {
             await new Promise((resolve, reject) => {
@@ -145,6 +148,49 @@ describe("Alerta de stock bajo", () => {
         assert.equal(porId.get("producto-inferior").stockBajo, true);
         assert.equal(porId.get("producto-superior").stockBajo, false);
         assert.equal(porId.has("producto-inactivo"), false);
+    });
+
+    test("filtra el inventario por estado sin confundir stock bajo con sin stock", async () => {
+        const stockBajo = await movimientoStockService.listarStock(1, 10, { estado: "stock-bajo" });
+        assert.equal(stockBajo.total, 2);
+        assert.deepEqual(
+            stockBajo.data.map((item) => item.id),
+            ["producto-igual", "producto-inferior"]
+        );
+
+        const enStock = await movimientoStockService.listarStock(1, 10, { estado: "en-stock" });
+        assert.equal(enStock.total, 1);
+        assert.deepEqual(enStock.data.map((item) => item.id), ["producto-superior"]);
+
+        const sinStock = await movimientoStockService.listarStock(1, 10, { estado: "sin-stock" });
+        assert.equal(sinStock.total, 0);
+    });
+
+    test("el resumen de inventario alimenta las tarjetas de la vista de stock", async () => {
+        const resumen = await movimientoStockService.obtenerResumenInventario();
+
+        assert.equal(resumen.totalProductos, 3);
+        assert.equal(resumen.stockBajo, 2);
+        assert.equal(resumen.sinStock, 0);
+        assert.equal(resumen.categorias, 1);
+        assert.equal(resumen.umbralStockBajo, 5);
+    });
+
+    test("expone el resumen de inventario al personal interno y lo protege del cliente", async () => {
+        const tokenCajero = tokenPara("Cajero");
+        const respuesta = await consultar("/stock/resumen-inventario", { token: tokenCajero });
+        assert.equal(respuesta.status, 200);
+
+        const datos = await respuesta.json();
+        assert.equal(datos.totalProductos, 3);
+        assert.equal(datos.stockBajo, 2);
+        assert.equal(datos.sinStock, 0);
+        assert.equal(datos.categorias, 1);
+
+        const cliente = await consultar("/stock/resumen-inventario", {
+            token: tokenPara("Cliente")
+        });
+        assert.equal(cliente.status, 403);
     });
 
     test("el resumen del dashboard usa el mismo umbral y devuelve la cantidad afectada", async () => {

@@ -134,7 +134,9 @@ describe("API de disponibilidad y retiro programado", () => {
         assert.equal(venta.horarioRetiroInicio, "09:00");
         assert.equal(venta.horarioRetiroFin, "10:00");
 
-        const detalleCliente = await solicitar("/ventas/comprobante/" + venta.codigoComprobante);
+        const detalleCliente = await solicitar("/ventas/comprobante/" + venta.codigoComprobante, {
+            headers: { "x-token-comprobante": venta.tokenAcceso }
+        });
         assert.equal(detalleCliente.respuesta.status, 200);
         assert.equal(detalleCliente.datos.venta.nombrePersonalizado, "Compra semanal");
         assert.equal(detalleCliente.datos.venta.fechaRetiro.slice(0, 10), fechaRetiro);

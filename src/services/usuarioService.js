@@ -4,9 +4,12 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
 const mailService = require("./mailService");
+const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const { validarFormatoDni, obtenerVariantesDni } = require("../utils/dni");
 
 const DURACION_TOKEN_RECUPERACION_MS = 60 * 60 * 1000;
+// Hash de relleno para que el login tarde lo mismo aunque el email no exista.
+const HASH_RELLENO = bcrypt.hashSync("hash-de-relleno-para-tiempo-constante", 10);
 
 function crearErrorTokenRecuperacion() {
     const error = new Error("El enlace de recuperación no es válido o venció.");
@@ -19,7 +22,12 @@ function obtenerHashToken(token) {
 }
 
 async function registrarUsuario(datos) {
-    const { nombre, apellido, dni, email, contrasena, rol } = datos;
+    const { nombre, apellido, contrasena, rol } = datos;
+    // El email se guarda normalizado para que no existan cuentas duplicadas que
+    // solo difieran en mayusculas/minusculas. El DNI se compara con sus
+    // variantes (con y sin puntos) igual que en el resto del sistema.
+    const email = String(datos.email).trim().toLowerCase();
+    const dni = String(datos.dni).trim();
 
     const rolEncontrado = await prisma.rol.findUnique({
         where: { nombre: rol }
@@ -33,59 +41,70 @@ async function registrarUsuario(datos) {
     const usuarioExistente = await prisma.usuario.findFirst({
         where: {
             OR: [
-                { email: email },
-                { dni: dni }
+                { email: { equals: email, mode: "insensitive" } },
+                { dni: { in: obtenerVariantesDni(dni) } }
             ]
         }
     });
 
     if (usuarioExistente) {
-        const error = new Error("Ya existe un usuario registrado con los datos ingresados");
-        error.status = 409;
-        throw error;
+        // Mensaje uniforme: no se indica si el conflicto fue por email o DNI.
+        throw new ErrorPersonalizado("Ya existe una cuenta con los datos ingresados", 409);
     }
 
     const contrasenaEncriptada = await bcrypt.hash(contrasena, 10);
 
-    const nuevoUsuario = await prisma.usuario.create({
-        data: {
-            nombre: nombre,
-            apellido: apellido,
-            dni: dni,
-            email: email,
-            contrasena: contrasenaEncriptada,
-            rolId: rolEncontrado.id
+    try {
+        return await prisma.usuario.create({
+            data: {
+                nombre: nombre,
+                apellido: apellido,
+                dni: dni,
+                email: email,
+                contrasena: contrasenaEncriptada,
+                rolId: rolEncontrado.id
+            }
+        });
+    } catch (error) {
+        // Condicion de carrera contra los indices unicos de email o DNI.
+        if (error.code === "P2002") {
+            throw new ErrorPersonalizado("Ya existe una cuenta con los datos ingresados", 409);
         }
-    });
-
-    return nuevoUsuario;
+        throw error;
+    }
 }
 
 async function iniciarSesion(datos) {
     const { email, contrasena } = datos;
 
-    const usuario = await prisma.usuario.findUnique({
-        where: { email: email },
+    // Busqueda insensible a mayusculas para que las cuentas creadas antes de
+    // normalizar el email puedan seguir iniciando sesion.
+    const usuario = await prisma.usuario.findFirst({
+        where: { email: { equals: email, mode: "insensitive" } },
         include: { rol: true }
     });
 
     if (!usuario) {
-        throw new Error("Email o contrasena incorrectos");
+        // Se compara igual contra un hash de relleno para no filtrar por tiempo
+        // si el email esta registrado o no.
+        await bcrypt.compare(contrasena, HASH_RELLENO);
+        throw new ErrorPersonalizado("Email o contrasena incorrectos", 401);
     }
 
     const contrasenaValida = await bcrypt.compare(contrasena, usuario.contrasena);
 
     if (!contrasenaValida) {
-        throw new Error("Email o contrasena incorrectos");
+        throw new ErrorPersonalizado("Email o contrasena incorrectos", 401);
     }
 
     const token = jwt.sign(
         {
             id: usuario.id,
-            rol: usuario.rol.nombre
+            rol: usuario.rol.nombre,
+            tv: usuario.tokenVersion
         },
         process.env.JWT_SECRET,
-        { expiresIn: "8h" }
+        { expiresIn: "8h", algorithm: "HS256" }
     );
 
     return {
@@ -102,10 +121,11 @@ async function iniciarSesion(datos) {
 }
 
 async function solicitarRecuperacionContrasena(email) {
-    const usuario = await prisma.usuario.findUnique({
-        where: { email },
+    const usuario = await prisma.usuario.findFirst({
+        where: { email: { equals: email, mode: "insensitive" } },
         select: {
             id: true,
+            email: true,
             rol: { select: { nombre: true } }
         }
     });
@@ -127,7 +147,7 @@ async function solicitarRecuperacionContrasena(email) {
     });
 
     try {
-        await mailService.enviarCorreoRecuperacionContrasena(email, token);
+        await mailService.enviarCorreoRecuperacionContrasena(usuario.email, token);
     } catch (error) {
         console.error("No se pudo enviar el correo de recuperación:", error.message);
         await prisma.recuperacionContrasena.deleteMany({
@@ -164,7 +184,11 @@ async function restablecerContrasena(token, contrasena) {
 
         await transaccion.usuario.update({
             where: { id: recuperacion.usuarioId },
-            data: { contrasena: contrasenaEncriptada }
+            data: {
+                contrasena: contrasenaEncriptada,
+                // Invalida todas las sesiones abiertas del usuario.
+                tokenVersion: { increment: 1 }
+            }
         });
     });
 }
@@ -201,7 +225,7 @@ async function obtenerPerfilUsuario(usuarioId) {
 async function actualizarPerfilUsuario(usuarioId, datos) {
     const usuario = await prisma.usuario.findUnique({
         where: { id: usuarioId },
-        select: { id: true }
+        select: { id: true, email: true, contrasena: true }
     });
 
     if (!usuario) {
@@ -254,6 +278,23 @@ async function actualizarPerfilUsuario(usuarioId, datos) {
             const error = new Error("El DNI ya está en uso por otro usuario");
             error.status = 409;
             throw error;
+        }
+    }
+
+    // Cambiar el email permite quedarse con una cuenta si se roba un token.
+    // Por eso se exige re-autenticacion con la contrasena actual.
+    const cambiaEmail = cambios.email &&
+        cambios.email.toLowerCase() !== String(usuario.email).toLowerCase();
+    if (cambiaEmail) {
+        if (!datos.contrasenaActual) {
+            throw new ErrorPersonalizado(
+                "Para cambiar el email debés ingresar tu contraseña actual",
+                400
+            );
+        }
+        const contrasenaValida = await bcrypt.compare(datos.contrasenaActual, usuario.contrasena);
+        if (!contrasenaValida) {
+            throw new ErrorPersonalizado("La contraseña actual no es correcta", 400);
         }
     }
 
@@ -317,10 +358,31 @@ async function cambiarContrasenaUsuario(usuarioId, datos) {
 
     const contrasenaEncriptada = await bcrypt.hash(datos.contrasenaNueva, 10);
 
-    await prisma.usuario.update({
+    const actualizado = await prisma.usuario.update({
         where: { id: usuarioId },
-        data: { contrasena: contrasenaEncriptada }
+        data: {
+            contrasena: contrasenaEncriptada,
+            // Cierra las demas sesiones abiertas con tokens anteriores.
+            tokenVersion: { increment: 1 }
+        },
+        select: {
+            id: true,
+            tokenVersion: true,
+            rol: { select: { nombre: true } }
+        }
     });
+
+    // Se emite un token nuevo para que la sesion que cambio la contrasena siga
+    // funcionando; los demas tokens quedan invalidados por tokenVersion.
+    return jwt.sign(
+        {
+            id: actualizado.id,
+            rol: actualizado.rol.nombre,
+            tv: actualizado.tokenVersion
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: "8h", algorithm: "HS256" }
+    );
 }
 
 async function obtenerClientePorDni(dni) {

@@ -1,6 +1,7 @@
 require("dotenv/config");
 const { test, describe, before, after } = require("node:test");
 const assert = require("node:assert");
+const crypto = require("node:crypto");
 const http = require("node:http");
 const jwt = require("jsonwebtoken");
 const app = require("../src/app");
@@ -490,11 +491,13 @@ describe("TASK-012: Historial de compras del cliente", () => {
         }
     });
 
-    test("7a. La compra anónima de autogestión descarga el PDF usando el código público sin sesión", async () => {
+    test("7a. La compra anónima de autogestión descarga el PDF con su token de acceso sin sesión", async () => {
         const codigoComprobante = `V-TEST-ANONIMO-${Date.now()}`;
+        const tokenAcceso = crypto.randomBytes(32).toString("hex");
         const ventaAnonima = await prisma.venta.create({
             data: {
                 codigoComprobante,
+                tokenAcceso,
                 clienteNombre: "Consumidor final",
                 estado: "COBRADA",
                 total: 1250.50,
@@ -510,11 +513,16 @@ describe("TASK-012: Historial de compras del cliente", () => {
         });
 
         try {
-            const res = await fetch(`${baseUrl}/ventas/comprobante/${encodeURIComponent(codigoComprobante)}/pdf`);
+            const sinToken = await fetch(`${baseUrl}/ventas/comprobante/${encodeURIComponent(codigoComprobante)}/pdf`);
+            assert.strictEqual(sinToken.status, 401);
+
+            const res = await fetch(`${baseUrl}/ventas/comprobante/${encodeURIComponent(codigoComprobante)}/pdf`, {
+                headers: { "x-token-comprobante": tokenAcceso }
+            });
             assert.strictEqual(res.status, 200);
             assert.match(res.headers.get("content-type"), /application\/pdf/);
             assert.match(res.headers.get("content-disposition"), /comprobante-compra-V-TEST-ANONIMO-/);
-            assert.strictEqual(res.headers.get("cache-control"), "no-store");
+            assert.strictEqual(res.headers.get("cache-control"), "private, no-store");
 
             const pdf = Buffer.from(await res.arrayBuffer());
             assert.strictEqual(pdf.subarray(0, 5).toString(), "%PDF-");
