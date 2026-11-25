@@ -4,7 +4,9 @@ const ErrorPersonalizado = require("../utils/errorPersonalizado");
 const mailService = require("./mailService");
 const mercadoPagoQrService = require("./mercadoPagoQrService");
 const { calcularPaginacion, calcularTotalPaginas } = require("../utils/paginacion");
-const { calcularPrecioPromocional } = require("./promocionService");
+const { calcularPrecioPromocional, calcularPromocionesCombo } = require("./promocionService");
+const { validarHorarioRetiro } = require("./retiroService");
+const { normalizarDni, validarFormatoDni, obtenerVariantesDni } = require("../utils/dni");
 
 function generarCodigoComprobante() {
     const fecha = new Date();
@@ -15,18 +17,56 @@ function generarCodigoComprobante() {
     return `V-${anio}${mes}${dia}-${random}`;
 }
 
+async function notificarCompraListaParaPreparar(tx, venta) {
+    if (venta.origen !== "AUTOGESTION") return;
+
+    const destinatarios = await tx.usuario.findMany({
+        where: { rol: { nombre: { in: ["Administrador", "Cajero"] } } },
+        select: { id: true }
+    });
+    if (destinatarios.length === 0) return;
+
+    await tx.notificacion.createMany({
+        data: destinatarios.map(function (destinatario) {
+            return {
+                usuarioId: destinatario.id,
+                ventaId: venta.id,
+                mensaje: "La compra " + venta.codigoComprobante + " está pagada y lista para comenzar a preparar."
+            };
+        }),
+        skipDuplicates: true
+    });
+}
+
+function normalizarNombrePersonalizado(nombre) {
+    if (typeof nombre !== "string") return nombre;
+    return nombre.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
-    const { items, cliente, metodoPago } = datos;
+    const { items, cliente, metodoPago, retiro, nombrePersonalizado } = datos;
 
     if (!items || items.length === 0) {
         throw new ErrorPersonalizado("La venta debe tener al menos un producto", 400);
     }
+    if (origen === "AUTOGESTION" && !retiro) {
+        throw new ErrorPersonalizado("La fecha y el horario de retiro son obligatorios", 400);
+    }
+
+    const cantidadesPorProducto = new Map();
+    for (const item of items) {
+        cantidadesPorProducto.set(item.productoId, (cantidadesPorProducto.get(item.productoId) || 0) + item.cantidad);
+    }
+    const itemsAgrupados = Array.from(cantidadesPorProducto, ([productoId, cantidad]) => ({ productoId, cantidad }));
 
     const resultado = await prisma.$transaction(async (tx) => {
-        let total = 0;
-        const detalles = [];
+        const fechaRetiro = origen === "AUTOGESTION"
+            ? await validarHorarioRetiro(tx, retiro)
+            : null;
+        let totalCentavos = 0;
+        const productosCalculados = [];
 
-        for (const item of items) {
+        for (const item of itemsAgrupados) {
             const producto = await tx.producto.findUnique({ where: { id: item.productoId } });
             if (!producto || !producto.activo) {
                 throw new ErrorPersonalizado("Producto no encontrado: " + item.productoId, 404);
@@ -46,31 +86,58 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
 
             const precio = await calcularPrecioPromocional(tx, {
                 ...producto,
-                categoria: (await tx.categoria.findUnique({ where: { id: producto.categoriaId }, select: { nombre: true } })).nombre
+                categoria: (await tx.categoria.findUnique({ where: { id: producto.categoriaId }, select: { nombre: true } })).nombre,
+                cantidad: item.cantidad
             });
-            const subtotal = precio.precioFinal * item.cantidad;
-            total += subtotal;
-
-            detalles.push({
-                productoId: producto.id,
+            if (precio.promocionNoAplicable) {
+                throw new ErrorPersonalizado(precio.promocionNoAplicable.mensaje, 409);
+            }
+            productosCalculados.push({
+                producto,
                 cantidad: item.cantidad,
-                precioUnitario: precio.precioFinal,
-                subtotal: subtotal
+                precio
             });
         }
+
+        const calculosCombo = calcularPromocionesCombo(productosCalculados);
+        const detalles = productosCalculados.map((item) => {
+            const calculoCombo = calculosCombo.get(item.producto.id);
+            const precioUnitarioCentavos = Math.round(item.precio.precioOriginal * 100);
+            const subtotalCentavos = calculoCombo.subtotalCentavos;
+            totalCentavos += subtotalCentavos;
+
+            return {
+                productoId: item.producto.id,
+                cantidad: item.cantidad,
+                precioUnitario: precioUnitarioCentavos / 100,
+                subtotal: subtotalCentavos / 100,
+                descuentoTotal: calculoCombo.descuentoTotalCentavos / 100,
+                unidadesBonificadas: calculoCombo.unidadesBonificadas,
+                combosAplicados: calculoCombo.combosAplicados,
+                promocionTitulo: calculoCombo.promocionTitulo
+            };
+        });
+
+        const nombrePersonalizadoNormalizado = normalizarNombrePersonalizado(nombrePersonalizado);
 
         const venta = await tx.venta.create({
             data: {
                 usuarioId: usuarioId || null,
+                ...(fechaRetiro && {
+                    fechaRetiro,
+                    horarioRetiroInicio: retiro.horaInicio,
+                    horarioRetiroFin: retiro.horaFin
+                }),
                 clienteNombre: cliente?.nombre || null,
                 clienteApellido: cliente?.apellido || null,
                 clienteDni: cliente?.dni || null,
                 clienteEmail: cliente?.email || null,
+                nombrePersonalizado: nombrePersonalizadoNormalizado || null,
                 codigoComprobante: generarCodigoComprobante(),
                 estado: "PENDIENTE",
                 origen: origen,
                 metodoPago: metodoPago || null,
-                total: total,
+                total: totalCentavos / 100,
                 detalles: { create: detalles }
             },
             include: {
@@ -114,6 +181,7 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
                 data: {
                     mpOrderId: qr.orderId,
                     mpOrderStatus: qr.status,
+                    mpOrderStatusDetail: qr.statusDetail,
                     mpQrData: qr.qrData
                 },
                 include: {
@@ -134,7 +202,8 @@ async function registrarVenta(usuarioId, datos, origen = "AUTOGESTION") {
                     orderId: qr.orderId,
                     qrData: qr.qrData,
                     expiresAt: qr.expiresAt,
-                    estado: qr.status
+                    estado: qr.status,
+                    detalleEstado: qr.statusDetail
                 }
             };
         } catch (error) {
@@ -195,6 +264,17 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
             }
         }
 
+        const actualizacionVenta = await tx.venta.updateMany({
+            where: { id: ventaId, estado: "PENDIENTE" },
+            data: {
+                estado: "COBRADA",
+                metodoPago: metodoPago
+            }
+        });
+        if (actualizacionVenta.count !== 1) {
+            throw new ErrorPersonalizado("La venta cambió mientras se procesaba el cobro", 409);
+        }
+
         for (const detalle of venta.detalles) {
             await tx.movimientoStock.create({
                 data: {
@@ -214,18 +294,15 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
             });
         }
 
-        const ventaCobrada = await tx.venta.update({
+        const ventaCobrada = await tx.venta.findUnique({
             where: { id: ventaId },
-            data: {
-                estado: "COBRADA",
-                metodoPago: metodoPago
-            },
             include: {
                 detalles: { include: { producto: { select: { nombre: true } } } },
                 usuario: { select: { email: true } }
             }
         });
 
+        await notificarCompraListaParaPreparar(tx, ventaCobrada);
         return ventaCobrada;
     });
 
@@ -245,22 +322,37 @@ async function cobrarVenta(ventaId, metodoPago, efectivoRecibido) {
 }
 
 async function cambiarEstadoRetiro(ventaId, estadoNuevo, estadosPermitidos) {
-    const venta = await prisma.venta.findUnique({ where: { id: ventaId } });
-    if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
-    if (venta.origen !== "AUTOGESTION") {
-        throw new ErrorPersonalizado("Las ventas rápidas se entregan en el momento y no requieren preparación para retiro", 400);
-    }
-    if (!estadosPermitidos.includes(venta.estado)) {
-        throw new ErrorPersonalizado("La venta debe estar en " + estadosPermitidos.join(" o ") + " para avanzar a " + estadoNuevo, 400);
-    }
-
-    return prisma.venta.update({
-        where: { id: ventaId },
-        data: { estado: estadoNuevo },
-        include: {
-            detalles: { include: { producto: { select: { nombre: true } } } },
-            usuario: { select: { email: true } }
+    return prisma.$transaction(async (tx) => {
+        const venta = await tx.venta.findUnique({ where: { id: ventaId } });
+        if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+        if (venta.origen !== "AUTOGESTION") {
+            throw new ErrorPersonalizado("Las ventas rápidas se entregan en el momento y no requieren preparación para retiro", 400);
         }
+        if (!estadosPermitidos.includes(venta.estado)) {
+            throw new ErrorPersonalizado("La venta debe estar en " + estadosPermitidos.join(" o ") + " para avanzar a " + estadoNuevo, 400);
+        }
+
+        const actualizacion = await tx.venta.updateMany({
+            where: {
+                id: ventaId,
+                origen: "AUTOGESTION",
+                estado: venta.estado
+            },
+            data: { estado: estadoNuevo }
+        });
+        if (actualizacion.count !== 1) {
+            throw new ErrorPersonalizado("La venta cambió mientras se procesaba la operación. Actualizá e intentá nuevamente.", 409);
+        }
+
+        const ventaActualizada = await tx.venta.findUnique({
+            where: { id: ventaId },
+            include: {
+                detalles: { include: { producto: { select: { nombre: true } } } },
+                usuario: { select: { email: true } }
+            }
+        });
+
+        return ventaActualizada;
     });
 }
 
@@ -297,18 +389,39 @@ async function cancelarVenta(ventaId) {
         }
 
         if (orden.status === "created") {
-            await mercadoPagoQrService.cancelarOrden(venta.mpOrderId, venta.id);
+            const ordenCancelada = await mercadoPagoQrService.cancelarOrden(venta.mpOrderId, venta.id);
+            if (ordenCancelada.status === "processed") {
+                await sincronizarOrdenQr(ordenCancelada);
+                throw new ErrorPersonalizado("El pago ya fue acreditado y no se puede cancelar", 409);
+            }
+            if (!["canceled", "expired"].includes(ordenCancelada.status)) {
+                throw new ErrorPersonalizado("Mercado Pago no confirmó la cancelación de la orden", 409);
+            }
+            return cancelarVentaLocal(ventaId, ordenCancelada.status, ordenCancelada.status_detail);
         } else if (orden.status !== "expired" && orden.status !== "canceled") {
             throw new ErrorPersonalizado("No se puede cancelar la orden en su estado actual", 409);
         }
 
-        return cancelarVentaLocal(ventaId, orden.status === "expired" ? "expired" : "canceled");
+        return cancelarVentaLocal(ventaId, orden.status, orden.status_detail);
     }
 
     return cancelarVentaLocal(ventaId, "canceled");
 }
 
-async function cancelarVentaLocal(ventaId, estadoOrden) {
+async function cancelarVentaCliente(ventaId, usuarioId) {
+    const venta = await prisma.venta.findFirst({
+        where: { id: ventaId, usuarioId },
+        select: { id: true, estado: true }
+    });
+    if (!venta) throw new ErrorPersonalizado("Compra no encontrada", 404);
+    if (venta.estado !== "PENDIENTE") {
+        throw new ErrorPersonalizado("Solo se pueden cancelar compras pendientes", 409);
+    }
+
+    return cancelarVenta(venta.id);
+}
+
+async function cancelarVentaLocal(ventaId, estadoOrden, detalleEstadoOrden = null) {
     const resultado = await prisma.$transaction(async (tx) => {
         const venta = await tx.venta.findUnique({
             where: { id: ventaId },
@@ -316,11 +429,17 @@ async function cancelarVentaLocal(ventaId, estadoOrden) {
         });
 
         if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
-        if (venta.estado !== "PENDIENTE") {
-            throw new ErrorPersonalizado(
-                "Solo se pueden cancelar ventas en estado PENDIENTE (estado actual: " + venta.estado + ")",
-                400
-            );
+        const actualizacionVenta = await tx.venta.updateMany({
+            where: { id: ventaId, estado: "PENDIENTE" },
+            data: {
+                estado: "CANCELADA",
+                mpOrderStatus: estadoOrden,
+                mpOrderStatusDetail: detalleEstadoOrden,
+                mpQrData: null
+            }
+        });
+        if (actualizacionVenta.count !== 1) {
+            throw new ErrorPersonalizado("La venta ya no está pendiente y no se puede cancelar", 409);
         }
 
         for (const detalle of venta.detalles) {
@@ -330,13 +449,8 @@ async function cancelarVentaLocal(ventaId, estadoOrden) {
             });
         }
 
-        const ventaCancelada = await tx.venta.update({
+        const ventaCancelada = await tx.venta.findUnique({
             where: { id: ventaId },
-            data: {
-                estado: "CANCELADA",
-                mpOrderStatus: estadoOrden,
-                mpQrData: null
-            },
             include: { detalles: true }
         });
 
@@ -346,12 +460,13 @@ async function cancelarVentaLocal(ventaId, estadoOrden) {
     return resultado;
 }
 
-async function listarVentas(filtros) {
-    const { skip, take, page, limit } = calcularPaginacion(filtros.pagina, filtros.limite);
-
-    const where = {
+function crearFiltrosVentas(filtros) {
+    return {
         ...(filtros.estado && { estado: filtros.estado }),
         ...(filtros.clienteId && { usuarioId: filtros.clienteId }),
+        ...(filtros.buscar && {
+            codigoComprobante: { contains: filtros.buscar, mode: "insensitive" }
+        }),
         ...((filtros.fechaDesde || filtros.fechaHasta) && {
             fecha: {
                 ...(filtros.fechaDesde && { gte: filtros.fechaDesde }),
@@ -359,6 +474,11 @@ async function listarVentas(filtros) {
             }
         })
     };
+}
+
+async function listarVentas(filtros) {
+    const { skip, take, page, limit } = calcularPaginacion(filtros.pagina, filtros.limite);
+    const where = crearFiltrosVentas(filtros);
 
     const [ventas, total] = await prisma.$transaction([
         prisma.venta.findMany({
@@ -389,6 +509,25 @@ async function listarVentas(filtros) {
     };
 }
 
+async function listarVentasParaReporte(filtros) {
+    return prisma.venta.findMany({
+        where: crearFiltrosVentas(filtros),
+        select: {
+            codigoComprobante: true,
+            fecha: true,
+            clienteNombre: true,
+            clienteApellido: true,
+            estado: true,
+            metodoPago: true,
+            total: true,
+            usuario: {
+                select: { nombre: true, apellido: true }
+            }
+        },
+        orderBy: { fecha: "desc" }
+    });
+}
+
 async function obtenerVentaPorId(id) {
     const venta = await prisma.venta.findUnique({
         where: { id: id },
@@ -399,6 +538,22 @@ async function obtenerVentaPorId(id) {
     });
     if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
     return venta;
+}
+
+async function renombrarVenta(id, usuarioId, nombrePersonalizado) {
+    const venta = await prisma.venta.findUnique({
+        where: { id },
+        select: { id: true, usuarioId: true }
+    });
+    if (!venta) throw new ErrorPersonalizado("Venta no encontrada", 404);
+    if (venta.usuarioId !== usuarioId) {
+        throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
+    }
+
+    return prisma.venta.update({
+        where: { id },
+        data: { nombrePersonalizado }
+    });
 }
 
 async function obtenerVentaPorCodigoComprobante(codigo) {
@@ -412,12 +567,13 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
     });
     if (!venta) throw new ErrorPersonalizado("Comprobante no encontrado", 404);
 
+    let verificacionPagoPendiente = false;
     if (venta.estado === "PENDIENTE" && venta.mpOrderId) {
         let orden;
         try {
             orden = await mercadoPagoQrService.obtenerOrden(venta.mpOrderId);
         } catch {
-            // El comprobante sigue disponible aunque Mercado Pago no responda momentaneamente.
+            verificacionPagoPendiente = true;
         }
 
         if (orden && orden.status !== "created") {
@@ -429,9 +585,12 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
         }
     }
 
-    const { mpQrData, mpOrderId, mpOrderStatus, ...comprobante } = venta;
+    const { mpQrData, mpOrderId, mpOrderStatus, mpOrderStatusDetail, ...comprobante } = venta;
     return {
         ...comprobante,
+        estadoPago: mpOrderStatus,
+        detalleEstadoPago: mpOrderStatusDetail,
+        verificacionPagoPendiente,
         pagoQrData: venta.estado === "PENDIENTE" && mpOrderId && mpOrderStatus === "created"
             ? mpQrData
             : null
@@ -439,46 +598,66 @@ async function obtenerVentaPorCodigoComprobante(codigo) {
 }
 
 async function registrarVentaDirecta(cajeroId, datos) {
-    const venta = await registrarVenta(cajeroId, datos, "RAPIDA");
+    let clienteIdParaVenta = null;
+    let clienteDatos = datos.cliente ? { ...datos.cliente } : null;
 
-    if (datos.cobrar && datos.metodoPago === "MercadoPago") {
-        let qr;
-        try {
-            qr = await mercadoPagoQrService.crearQrDinamico(venta);
-            const ventaConQr = await prisma.venta.update({
-                where: { id: venta.id },
-                data: {
-                    mpOrderId: qr.orderId,
-                    mpOrderStatus: qr.status,
-                    mpQrData: qr.qrData
-                },
-                include: {
-                    detalles: { include: { producto: { select: { nombre: true } } } }
-                }
+    if (datos.cliente) {
+        let usuarioCliente = null;
+        if (datos.cliente.id) {
+            usuarioCliente = await prisma.usuario.findFirst({
+                where: { id: datos.cliente.id, rol: { nombre: "Cliente" } },
+                select: { id: true, nombre: true, apellido: true, dni: true, email: true }
             });
-
-            return {
-                venta: ventaConQr,
-                pago: {
-                    proveedor: "MercadoPago",
-                    orderId: qr.orderId,
-                    qrData: qr.qrData,
-                    expiresAt: qr.expiresAt,
-                    estado: qr.status
-                },
-                cobradaDirectamente: false
-            };
-        } catch (error) {
-            if (qr?.orderId) {
-                await mercadoPagoQrService.cancelarOrden(qr.orderId, venta.id).catch(function () {});
+        } else if (datos.cliente.dni) {
+            const dniOriginal = String(datos.cliente.dni).trim();
+            if (!validarFormatoDni(dniOriginal)) {
+                throw new ErrorPersonalizado("El formato del DNI no es válido", 400);
             }
-            await cancelarVentaLocal(venta.id, "canceled").catch(function () {});
-            throw error;
+            usuarioCliente = await prisma.usuario.findFirst({
+                where: {
+                    OR: obtenerVariantesDni(dniOriginal).map((dniVariante) => ({ dni: dniVariante })),
+                    rol: { nombre: "Cliente" }
+                },
+                select: { id: true, nombre: true, apellido: true, dni: true, email: true }
+            });
+        }
+
+        if ((datos.cliente.id || datos.cliente.dni) && !usuarioCliente) {
+            throw new ErrorPersonalizado("No se encontró el cliente registrado seleccionado", 404);
+        }
+
+        if (usuarioCliente) {
+            if (datos.cliente.dni && normalizarDni(String(datos.cliente.dni)) !== normalizarDni(usuarioCliente.dni)) {
+                throw new ErrorPersonalizado("El DNI no corresponde al cliente seleccionado", 400);
+            }
+            clienteIdParaVenta = usuarioCliente.id;
+            clienteDatos = {
+                nombre: usuarioCliente.nombre,
+                apellido: usuarioCliente.apellido,
+                dni: usuarioCliente.dni,
+                email: usuarioCliente.email
+            };
         }
     }
 
+    const datosVenta = {
+        ...datos,
+        cliente: clienteDatos
+    };
+
+    const registro = await registrarVenta(clienteIdParaVenta, datosVenta, "RAPIDA");
+    const { pago, ...venta } = registro;
+
+    if (pago) {
+        return {
+            venta,
+            pago,
+            cobradaDirectamente: false
+        };
+    }
+
     if (datos.cobrar && datos.metodoPago) {
-        const resultadoCobro = await cobrarVenta(venta.id, datos.metodoPago);
+        const resultadoCobro = await cobrarVenta(venta.id, datos.metodoPago, datos.efectivoRecibido);
         return {
             venta: resultadoCobro.venta,
             correo: resultadoCobro.correo,
@@ -493,11 +672,11 @@ async function registrarVentaDirecta(cajeroId, datos) {
 }
 
 function validarOrdenQr(venta, orden) {
-    if (orden.external_reference !== venta.id) {
+    if (orden.id !== venta.mpOrderId || orden.type !== "qr") {
         throw new ErrorPersonalizado("La orden de Mercado Pago no corresponde a esta venta", 409);
     }
-    if (venta.mpOrderId && orden.id !== venta.mpOrderId) {
-        throw new ErrorPersonalizado("El identificador de la orden no coincide con la venta", 409);
+    if (orden.external_reference !== venta.id) {
+        throw new ErrorPersonalizado("La orden de Mercado Pago no corresponde a esta venta", 409);
     }
     if (orden.currency !== "ARS" || Number(orden.total_amount) !== Number(venta.total)) {
         throw new ErrorPersonalizado("El importe o la moneda de la orden no coincide con la venta", 409);
@@ -519,7 +698,7 @@ async function sincronizarOrdenQr(orden) {
     validarOrdenQr(venta, orden);
 
     if (orden.status === "processed") {
-        if (venta.estado === "COBRADA") return venta;
+        if (["COBRADA", "EN_PREPARACION", "LISTA_PARA_RETIRAR", "RETIRADA"].includes(venta.estado)) return venta;
         if (venta.estado !== "PENDIENTE") {
             throw new ErrorPersonalizado("La orden se pagó pero la venta ya no está pendiente", 409);
         }
@@ -532,6 +711,7 @@ async function sincronizarOrdenQr(orden) {
                     metodoPago: "Mercado Pago QR",
                     mpOrderId: orden.id,
                     mpOrderStatus: orden.status,
+                    mpOrderStatusDetail: orden.status_detail || null,
                     mpQrData: null
                 }
             });
@@ -573,6 +753,7 @@ async function sincronizarOrdenQr(orden) {
                     usuario: { select: { email: true } }
                 }
             });
+            await notificarCompraListaParaPreparar(tx, ventaCobrada);
             return { venta: ventaCobrada, nueva: true };
         });
 
@@ -589,14 +770,51 @@ async function sincronizarOrdenQr(orden) {
 
     if (orden.status === "expired" || orden.status === "canceled") {
         if (venta.estado === "PENDIENTE") {
-            return cancelarVentaLocal(venta.id, orden.status);
+            return cancelarVentaLocal(venta.id, orden.status, orden.status_detail);
         }
         return venta;
     }
 
+    if (orden.status === "refunded") {
+        if (venta.estado === "REEMBOLSADA") return venta;
+
+        return prisma.$transaction(async (tx) => {
+            const actual = await tx.venta.findUnique({
+                where: { id: venta.id },
+                include: { detalles: true }
+            });
+            if (!actual) throw new ErrorPersonalizado("Venta no encontrada", 404);
+            if (actual.estado === "REEMBOLSADA") return actual;
+
+            if (actual.estado === "PENDIENTE") {
+                for (const detalle of actual.detalles) {
+                    await tx.producto.update({
+                        where: { id: detalle.productoId },
+                        data: { stockReservado: { decrement: detalle.cantidad } }
+                    });
+                }
+            }
+
+            return tx.venta.update({
+                where: { id: actual.id },
+                data: {
+                    estado: "REEMBOLSADA",
+                    mpOrderStatus: orden.status,
+                    mpOrderStatusDetail: orden.status_detail || null,
+                    mpQrData: null
+                },
+                include: { detalles: true }
+            });
+        });
+    }
+
     return prisma.venta.update({
         where: { id: venta.id },
-        data: { mpOrderId: orden.id, mpOrderStatus: orden.status },
+        data: {
+            mpOrderId: orden.id,
+            mpOrderStatus: orden.status,
+            mpOrderStatusDetail: orden.status_detail || null
+        },
         include: { detalles: true }
     });
 }
@@ -614,17 +832,24 @@ async function consultarEstadoQr(ventaId) {
             proveedor: "MercadoPago",
             orderId: orden.id,
             estado: orden.status,
+            detalleEstado: orden.status_detail || null,
             qrData: orden.status === "created" ? venta.mpQrData : null,
             expiresAt: orden.expiration_time || null
         }
     };
 }
 
-async function procesarNotificacionQr(notificacion) {
-    const orderId = notificacion?.data?.id;
-    if (!orderId) return null;
+async function procesarNotificacionQr(orderId) {
+    const venta = await prisma.venta.findUnique({
+        where: { mpOrderId: orderId },
+        select: { id: true }
+    });
+    if (!venta) return null;
 
     const orden = await mercadoPagoQrService.obtenerOrden(orderId);
+    if (orden.id !== orderId || orden.type !== "qr") {
+        throw new ErrorPersonalizado("La orden notificada no corresponde a una compra QR local", 409);
+    }
     return sincronizarOrdenQr(orden);
 }
 
@@ -636,8 +861,11 @@ module.exports = {
     marcarVentaListaParaRetirar,
     marcarVentaRetirada,
     cancelarVenta,
+    cancelarVentaCliente,
     listarVentas,
+    listarVentasParaReporte,
     obtenerVentaPorId,
+    renombrarVenta,
     obtenerVentaPorCodigoComprobante,
     consultarEstadoQr,
     procesarNotificacionQr

@@ -23,6 +23,31 @@ const paginacionStockSchema = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(10)
 });
 
+const listarStockSchema = paginacionStockSchema.extend({
+    bajo: z.enum(["true", "false"])
+        .optional()
+        .transform((valor) => valor === "true")
+});
+
+const configuracionStockSchema = z.object({
+    umbralStockBajo: z.number()
+        .int("El umbral debe ser un número entero")
+        .min(0, "El umbral no puede ser negativo")
+        .max(2147483647, "El umbral es demasiado grande")
+}).strict();
+
+const vistaPreviaStockSchema = z.object({
+    umbral: z.string()
+        .trim()
+        .min(1, "El umbral es obligatorio")
+        .regex(/^\d+$/, "El umbral debe ser un número entero mayor o igual a cero")
+        .transform((valor) => Number(valor))
+        .refine(
+            (valor) => Number.isSafeInteger(valor) && valor <= 2147483647,
+            "El umbral es demasiado grande"
+        )
+});
+
 const historialMovimientosSchema = paginacionStockSchema.extend({
     productoId: z.string().uuid("El id de producto no es valido").optional(),
     tipo: z.enum(["ENTRADA", "SALIDA"]).optional(),
@@ -39,5 +64,8 @@ module.exports = {
     ajustarStockSchema,
     productoIdParamSchema,
     paginacionStockSchema,
+    listarStockSchema,
+    configuracionStockSchema,
+    vistaPreviaStockSchema,
     historialMovimientosSchema
 };

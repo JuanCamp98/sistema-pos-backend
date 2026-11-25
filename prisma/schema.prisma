@@ -33,8 +33,24 @@ model Usuario {
 
   rol    Rol     @relation(fields: [rolId], references: [id])
   ventas Venta[]
+  notificaciones Notificacion[]
+  recuperacionesContrasena RecuperacionContrasena[]
 
   @@map("usuarios")
+}
+
+model RecuperacionContrasena {
+  id        String   @id @default(uuid())
+  usuarioId String   @map("usuario_id")
+  tokenHash String   @unique @map("token_hash")
+  venceEn   DateTime @map("vence_en")
+  creadoEn  DateTime @default(now()) @map("creado_en")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([venceEn])
+  @@map("recuperaciones_contrasena")
 }
 
 // Productos disponibles para la venta
@@ -88,6 +104,8 @@ model TipoProducto {
 enum TipoDescuento {
   PORCENTAJE
   IMPORTE
+  DOS_POR_UNO
+  COMBO
 }
 
 model Promocion {
@@ -95,7 +113,8 @@ model Promocion {
   titulo         String
   descripcion    String?
   tipoDescuento  TipoDescuento @map("tipo_descuento")
-  valorDescuento Decimal       @map("valor_descuento") @db.Decimal(10, 2)
+  valorDescuento Decimal?      @map("valor_descuento") @db.Decimal(10, 2)
+  precioCombo    Decimal?      @map("precio_combo") @db.Decimal(10, 2)
   fechaInicio    DateTime      @map("fecha_inicio")
   fechaFin       DateTime      @map("fecha_fin")
   activo         Boolean       @default(true)
@@ -137,6 +156,7 @@ enum EstadoVenta {
   LISTA_PARA_RETIRAR
   RETIRADA
   CANCELADA
+  REEMBOLSADA
 }
 
 enum OrigenVenta {
@@ -148,36 +168,80 @@ enum OrigenVenta {
 model Venta {
   id                String      @id @default(uuid())
   fecha             DateTime    @default(now())
+  fechaRetiro       DateTime?   @db.Date @map("fecha_retiro")
+  horarioRetiroInicio String?   @map("horario_retiro_inicio") @db.VarChar(5)
+  horarioRetiroFin  String?     @map("horario_retiro_fin") @db.VarChar(5)
   total             Decimal     @db.Decimal(10, 2)
   usuarioId         String?     @map("usuario_id")
   clienteNombre     String?     @map("cliente_nombre")
   clienteApellido   String?     @map("cliente_apellido")
   clienteDni        String?     @map("cliente_dni")
   clienteEmail      String?     @map("cliente_email")
+  nombrePersonalizado String?   @map("nombre_personalizado") @db.VarChar(80)
   codigoComprobante String      @unique @map("codigo_comprobante")
   estado            EstadoVenta @default(PENDIENTE)
   origen            OrigenVenta @default(AUTOGESTION)
   metodoPago        String?     @map("metodo_pago")
   mpOrderId         String?     @unique @map("mp_order_id")
   mpOrderStatus     String?     @map("mp_order_status")
+  mpOrderStatusDetail String?   @map("mp_order_status_detail")
   mpQrData          String?     @map("mp_qr_data") @db.Text
   creadoEn          DateTime    @default(now()) @map("creado_en")
   actualizadoEn     DateTime    @updatedAt @map("actualizado_en")
 
   usuario  Usuario?       @relation(fields: [usuarioId], references: [id])
   detalles DetalleVenta[]
+  notificaciones Notificacion[]
 
   @@map("ventas")
 }
 
+model ConfiguracionRetiro {
+  id              Int      @id @default(1)
+  configuracion   Json
+  actualizadoEn   DateTime @default(now()) @updatedAt @map("actualizado_en")
+
+  @@map("configuracion_retiro")
+}
+
+// Configuracion persistente de las alertas de inventario.
+// Es un registro unico (id = 1) para que el umbral sea el mismo para todo el sistema.
+model ConfiguracionStock {
+  id              Int      @id @default(1)
+  umbralStockBajo Int      @default(5) @map("umbral_stock_bajo")
+  actualizadoEn   DateTime @updatedAt @map("actualizado_en")
+
+  @@map("configuracion_stock")
+}
+
+model Notificacion {
+  id         String    @id @default(uuid())
+  usuarioId  String    @map("usuario_id")
+  ventaId    String    @map("venta_id")
+  mensaje    String
+  creadaEn   DateTime  @default(now()) @map("creada_en")
+  leidaEn    DateTime? @map("leida_en")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  venta   Venta   @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, ventaId])
+  @@index([usuarioId, creadaEn])
+  @@map("notificaciones")
+}
+
 // Cada producto vendido dentro de una venta
 model DetalleVenta {
-  id             String  @id @default(uuid())
-  ventaId        String  @map("venta_id")
-  productoId     String  @map("producto_id")
-  cantidad       Int
-  precioUnitario Decimal @map("precio_unitario") @db.Decimal(10, 2)
-  subtotal       Decimal @db.Decimal(10, 2)
+  id                 String  @id @default(uuid())
+  ventaId            String  @map("venta_id")
+  productoId         String  @map("producto_id")
+  cantidad           Int
+  precioUnitario     Decimal @map("precio_unitario") @db.Decimal(10, 2)
+  subtotal           Decimal @db.Decimal(10, 2)
+  descuentoTotal     Decimal @default(0) @map("descuento_total") @db.Decimal(10, 2)
+  unidadesBonificadas Int    @default(0) @map("unidades_bonificadas")
+  combosAplicados    Int     @default(0) @map("combos_aplicados")
+  promocionTitulo    String? @map("promocion_titulo")
 
   venta    Venta    @relation(fields: [ventaId], references: [id])
   producto Producto @relation(fields: [productoId], references: [id])

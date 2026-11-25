@@ -20,18 +20,24 @@ function crearContenido(venta) {
     const fecha = new Date(venta.fecha).toLocaleString("es-AR");
     const detalles = venta.detalles.map((detalle) => {
         const precio = Number(detalle.precioUnitario).toFixed(2);
-        return `- ${detalle.producto.nombre}: ${detalle.cantidad} x $${precio}`;
+        const promocion = detalle.promocionTitulo
+            ? ` (${detalle.promocionTitulo}${detalle.combosAplicados ? `, ${detalle.combosAplicados} combo(s) aplicado(s)` : detalle.unidadesBonificadas ? `, ${detalle.unidadesBonificadas} unidad(es) bonificada(s)` : ""}; ahorro $${Number(detalle.descuentoTotal || 0).toFixed(2)})`
+            : "";
+        return `- ${detalle.producto.nombre}: ${detalle.cantidad} x $${precio}${promocion} = $${Number(detalle.subtotal).toFixed(2)}`;
     }).join("\n");
+    const descuentos = venta.detalles.reduce((total, detalle) => total + Number(detalle.descuentoTotal || 0), 0);
 
     return [
         "Comprobante de compra",
         "",
+        ...(venta.nombrePersonalizado ? [`Nombre de compra: ${venta.nombrePersonalizado}`] : []),
         `Código: ${venta.codigoComprobante}`,
         `Fecha: ${fecha}`,
         "",
         "Productos:",
         detalles,
         "",
+        `Descuentos: $${descuentos.toFixed(2)}`,
         `Total: $${Number(venta.total).toFixed(2)}`
     ].join("\n");
 }
@@ -50,14 +56,18 @@ function crearContenidoHtml(venta, frontendUrl) {
     const filas = venta.detalles.map((detalle) => {
         const precio = Number(detalle.precioUnitario).toFixed(2);
         const subtotal = Number(detalle.subtotal).toFixed(2);
+        const promocion = detalle.promocionTitulo
+            ? `<small style="display:block; color:#24543d;">${escaparHtml(detalle.promocionTitulo)}${detalle.combosAplicados ? ` · ${detalle.combosAplicados} combo(s) aplicado(s)` : detalle.unidadesBonificadas ? ` · ${detalle.unidadesBonificadas} unidad(es) bonificada(s)` : ""} · ahorro ${escaparHtml(Number(detalle.descuentoTotal || 0).toFixed(2))}</small>`
+            : "";
         return `
             <tr>
-                <td style="padding: 12px 0; border-bottom: 1px solid #e5e1d8; color: #1f2933;">${escaparHtml(detalle.producto.nombre)}</td>
+                <td style="padding: 12px 0; border-bottom: 1px solid #e5e1d8; color: #1f2933;">${escaparHtml(detalle.producto.nombre)}${promocion}</td>
                 <td style="padding: 12px 8px; border-bottom: 1px solid #e5e1d8; color: #1f2933; text-align: center;">${detalle.cantidad}</td>
                 <td style="padding: 12px 0; border-bottom: 1px solid #e5e1d8; color: #1f2933; text-align: right;">$${precio}</td>
                 <td style="padding: 12px 0 12px 8px; border-bottom: 1px solid #e5e1d8; color: #1f2933; text-align: right;">$${subtotal}</td>
             </tr>`;
     }).join("");
+    const descuentos = venta.detalles.reduce((total, detalle) => total + Number(detalle.descuentoTotal || 0), 0);
     const urlComprobante = frontendUrl
         ? `${frontendUrl.replace(/\/$/, "")}/comprobante/${encodeURIComponent(venta.codigoComprobante)}`
         : null;
@@ -76,6 +86,11 @@ function crearContenidoHtml(venta, frontendUrl) {
         <section style="padding: 28px 32px;">
             <p style="margin: 0 0 20px; color: #52606d; line-height: 1.5;">Gracias por tu compra. Este es el resumen de tu comprobante.</p>
             <table role="presentation" width="100%" style="border-collapse: collapse; margin-bottom: 24px; font-size: 14px;">
+                ${venta.nombrePersonalizado ? `
+                <tr>
+                    <td style="color: #6b7280; padding-bottom: 6px;">Nombre de compra</td>
+                    <td style="text-align: right;">${escaparHtml(venta.nombrePersonalizado)}</td>
+                </tr>` : ""}
                 <tr>
                     <td style="color: #6b7280; padding-bottom: 6px;">Código</td>
                     <td style="text-align: right; font-family: monospace;">${escaparHtml(venta.codigoComprobante)}</td>
@@ -97,6 +112,7 @@ function crearContenidoHtml(venta, frontendUrl) {
                 <tbody>${filas}</tbody>
             </table>
             <div style="margin-top: 24px; padding-top: 18px; border-top: 1px dashed #b8b1a3; text-align: right;">
+                <span style="color: #6b7280; font-size: 13px;">Descuentos: $${descuentos.toFixed(2)}</span><br />
                 <span style="color: #6b7280; font-size: 14px; text-transform: uppercase;">Total</span>
                 <strong style="display: block; margin-top: 4px; color: #24543d; font-size: 28px;">$${Number(venta.total).toFixed(2)}</strong>
             </div>
@@ -174,4 +190,31 @@ async function enviarAvisoPedidoListo(venta) {
     return { enviado: true, estado: "ENVIADO", destinatario };
 }
 
-module.exports = { enviarComprobanteVenta, enviarAvisoPedidoListo };
+async function enviarCorreoRecuperacionContrasena(destinatario, token) {
+    const configuracion = obtenerConfiguracion();
+    if (!configuracion.host || !configuracion.user || !configuracion.pass || !configuracion.frontendUrl) {
+        throw new Error("El servicio de correo o la URL del frontend no están configurados");
+    }
+
+    const urlRecuperacion = `${configuracion.frontendUrl.replace(/\/$/, "")}/restablecer-contrasena?token=${encodeURIComponent(token)}`;
+    const transportador = nodemailer.createTransport({
+        host: configuracion.host,
+        port: configuracion.port,
+        secure: configuracion.secure,
+        auth: { user: configuracion.user, pass: configuracion.pass }
+    });
+
+    await transportador.sendMail({
+        from: configuracion.from,
+        to: destinatario,
+        subject: "Restablecé tu contraseña de Sistema POS",
+        text: `Recibimos una solicitud para restablecer tu contraseña. Usá este enlace dentro de una hora:\n\n${urlRecuperacion}\n\nSi no solicitaste este cambio, podés ignorar este correo.`,
+        html: `<main style="max-width: 620px; margin: 0 auto; padding: 28px; background: #ffffff; color: #1f2933; font-family: Arial, sans-serif; border: 1px solid #ddd7ca;"><p style="color: #24543d; font-size: 12px; letter-spacing: 2px; text-transform: uppercase;">Sistema POS</p><h1>Restablecé tu contraseña</h1><p>Recibimos una solicitud para cambiar la contraseña de tu cuenta. El enlace vence en una hora.</p><a href="${escaparHtml(urlRecuperacion)}" style="display: inline-block; margin-top: 16px; padding: 13px 20px; background: #24543d; color: #ffffff; font-weight: 700; text-decoration: none;">Crear nueva contraseña</a><p style="margin-top: 24px; color: #6b7280; font-size: 13px;">Si no solicitaste este cambio, podés ignorar este correo.</p></main>`
+    });
+}
+
+module.exports = {
+    enviarComprobanteVenta,
+    enviarAvisoPedidoListo,
+    enviarCorreoRecuperacionContrasena
+};

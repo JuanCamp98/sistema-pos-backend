@@ -10,6 +10,7 @@ const {
     ventaDirectaSchema,
     cobrarVentaSchema,
     cancelarVentaSchema,
+    renombrarVentaSchema,
     listarVentasQuerySchema
 } = require("../schemas/ventaSchema");
 const router = express.Router();
@@ -44,6 +45,11 @@ router.get(
 // GET /ventas/comprobante/:codigo: publico para reimprimir.
 // Va antes de /:id para que Express no matchee "comprobante" como id.
 router.get(
+    "/comprobante/:codigo/pdf",
+    ventaController.descargarComprobantePdfPorCodigo
+);
+
+router.get(
     "/comprobante/:codigo",
     ventaController.buscarPorComprobante
 );
@@ -61,6 +67,23 @@ router.get(
     verificarToken,
     verificarRol(["Cajero", "Administrador"]),
     ventaController.consultarEstadoQr
+);
+
+// GET /ventas/:id/comprobante.pdf: descarga autenticada con las mismas reglas de acceso al detalle.
+router.get(
+    "/:id/comprobante.pdf",
+    verificarToken,
+    verificarRol(["Cajero", "Administrador", "Cliente"]),
+    ventaController.descargarComprobantePdf
+);
+
+// PATCH /ventas/:id/nombre: el cliente solo puede renombrar una compra propia.
+router.patch(
+    "/:id/nombre",
+    verificarToken,
+    verificarRol(["Cliente"]),
+    validar(renombrarVentaSchema),
+    ventaController.renombrar
 );
 
 // GET /ventas/:id: Cajero, Administrador o Cliente autenticado (solo su propia compra).
@@ -87,6 +110,14 @@ router.patch(
     intentarAutenticar,
     validar(cancelarVentaSchema),
     ventaController.cancelar
+);
+
+// PATCH /ventas/:id/cancelar-cliente: un cliente autenticado solo cancela compras propias.
+router.patch(
+    "/:id/cancelar-cliente",
+    verificarToken,
+    verificarRol(["Cliente"]),
+    ventaController.cancelarCliente
 );
 
 // Flujo de preparación y retiro: no modifica ni consulta el estado de Mercado Pago.

@@ -5,6 +5,20 @@ const http = require("node:http");
 const jwt = require("jsonwebtoken");
 const app = require("../src/app");
 const prisma = require("../src/config/prisma");
+const comprobantePdfService = require("../src/services/comprobantePdfService");
+
+function extraerBloquesTextoPdf(pdf) {
+    const contenido = pdf.toString("latin1");
+    return Array.from(contenido.matchAll(/BT([\s\S]*?)ET/g), function (coincidencia) {
+        return Array.from(coincidencia[1].matchAll(/<([a-f0-9]+)>/gi), function (texto) {
+            return Buffer.from(texto[1], "hex").toString("latin1");
+        }).join("").trim();
+    });
+}
+
+function extraerTextoPdf(pdf) {
+    return extraerBloquesTextoPdf(pdf).join("");
+}
 
 describe("TASK-012: Historial de compras del cliente", () => {
     let server;
@@ -17,6 +31,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
     let tokenClienteA;
     let tokenClienteB;
     let tokenCajero;
+    let tokenAdministrador;
     let ventaClienteA;
     let ventaClienteB;
 
@@ -102,6 +117,11 @@ describe("TASK-012: Historial de compras del cliente", () => {
             process.env.JWT_SECRET,
             { expiresIn: "1h" }
         );
+        tokenAdministrador = jwt.sign(
+            { id: "administrador-uuid", rol: "Administrador" },
+            process.env.JWT_SECRET,
+            { expiresIn: "1h" }
+        );
 
         // Create a sale for Cliente A
         ventaClienteA = await prisma.venta.create({
@@ -165,6 +185,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
             await prisma.venta.delete({ where: { id: ventaClienteB.id } });
         }
         if (productoTest) {
+            await prisma.detalleVenta.deleteMany({ where: { productoId: productoTest.id } });
             await prisma.producto.delete({ where: { id: productoTest.id } });
         }
         if (categoriaTest) {
@@ -177,7 +198,10 @@ describe("TASK-012: Historial de compras del cliente", () => {
             await prisma.usuario.delete({ where: { id: clienteB.id } });
         }
         await prisma.$disconnect();
-        await new Promise((resolve) => server.close(resolve));
+        await new Promise((resolve, reject) => {
+            server.close((error) => error ? reject(error) : resolve());
+            server.closeAllConnections();
+        });
     });
 
     test("1. Rechaza la petición a GET /ventas si no se envía token (401)", async () => {
@@ -197,6 +221,54 @@ describe("TASK-012: Historial de compras del cliente", () => {
         assert.strictEqual(res.status, 403);
     });
 
+    test("3a. Cliente autenticado puede definir un nombre personalizado al confirmar una compra", async () => {
+        const fechaRetiro = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const fechaRetiroISO = new Date(fechaRetiro.getTime() - fechaRetiro.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+        await prisma.configuracionRetiro.upsert({
+            where: { id: 1 },
+            update: {
+                configuracion: {
+                    diasAtencion: [0, 1, 2, 3, 4, 5, 6],
+                    horaApertura: "08:00",
+                    horaCierre: "20:00",
+                    intervaloMinutos: 60,
+                    excepciones: []
+                }
+            },
+            create: {
+                id: 1,
+                configuracion: {
+                    diasAtencion: [0, 1, 2, 3, 4, 5, 6],
+                    horaApertura: "08:00",
+                    horaCierre: "20:00",
+                    intervaloMinutos: 60,
+                    excepciones: []
+                }
+            }
+        });
+
+        const res = await fetch(`${baseUrl}/ventas`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                nombrePersonalizado: "  Compra   confirmada  ",
+                items: [{ productoId: productoTest.id, cantidad: 1 }],
+                retiro: {
+                    fecha: fechaRetiroISO,
+                    horaInicio: "10:00",
+                    horaFin: "11:00"
+                }
+            })
+        });
+        assert.strictEqual(res.status, 201);
+        const data = await res.json();
+        assert.strictEqual(data.venta.nombrePersonalizado, "Compra confirmada");
+    });
+
     test("3. Cliente autenticado puede consultar su historial y solo ve sus compras", async () => {
         const res = await fetch(`${baseUrl}/ventas`, {
             headers: { Authorization: `Bearer ${tokenClienteA}` }
@@ -213,6 +285,7 @@ describe("TASK-012: Historial de compras del cliente", () => {
 
         const miVenta = data.ventas.find((v) => v.id === ventaClienteA.id);
         assert.ok(miVenta, "Debe incluir la venta del cliente A");
+        assert.strictEqual(miVenta.nombrePersonalizado, null);
         assert.strictEqual(miVenta.codigoComprobante, ventaClienteA.codigoComprobante);
         assert.strictEqual(Number(miVenta.total), 2501.00);
 
@@ -255,10 +328,268 @@ describe("TASK-012: Historial de compras del cliente", () => {
         const data = await res.json();
         assert.ok(data.venta);
         assert.strictEqual(data.venta.id, ventaClienteA.id);
+        assert.strictEqual(data.venta.nombrePersonalizado, null);
         assert.strictEqual(data.venta.detalles[0].producto.nombre, productoTest.nombre);
     });
 
-    test("7. Cliente sin compras recibe lista vacía", async () => {
+    test("Renombrar compra: valida autenticación, propiedad, nombre y conserva datos de venta", async () => {
+        const url = `${baseUrl}/ventas/${ventaClienteA.id}/nombre`;
+        const sinSesion = await fetch(url, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nombrePersonalizado: "Compra semanal" })
+        });
+        assert.strictEqual(sinSesion.status, 401);
+        await sinSesion.arrayBuffer();
+
+        const nombreVacio = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "   " })
+        });
+        assert.strictEqual(nombreVacio.status, 400);
+        await nombreVacio.arrayBuffer();
+
+        const nombreLargo = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "x".repeat(81) })
+        });
+        assert.strictEqual(nombreLargo.status, 400);
+        await nombreLargo.arrayBuffer();
+
+        const codigoOriginal = ventaClienteA.codigoComprobante;
+        const totalOriginal = Number(ventaClienteA.total);
+        const respuestaInicial = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "  Compra   semanal  " })
+        });
+        assert.strictEqual(respuestaInicial.status, 200);
+        const resultadoInicial = await respuestaInicial.json();
+        assert.strictEqual(resultadoInicial.venta.nombrePersonalizado, "Compra semanal");
+        assert.strictEqual(resultadoInicial.venta.codigoComprobante, codigoOriginal);
+        assert.strictEqual(Number(resultadoInicial.venta.total), totalOriginal);
+
+        const historial = await fetch(`${baseUrl}/ventas`, {
+            headers: { Authorization: `Bearer ${tokenClienteA}` }
+        });
+        const historialData = await historial.json();
+        const compraHistorial = historialData.ventas.find((venta) => venta.id === ventaClienteA.id);
+        assert.strictEqual(compraHistorial.nombrePersonalizado, "Compra semanal");
+
+        const detalle = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}`, {
+            headers: { Authorization: `Bearer ${tokenClienteA}` }
+        });
+        const detalleData = await detalle.json();
+        assert.strictEqual(detalleData.venta.nombrePersonalizado, "Compra semanal");
+        assert.strictEqual(detalleData.venta.codigoComprobante, codigoOriginal);
+        assert.strictEqual(Number(detalleData.venta.total), totalOriginal);
+        assert.strictEqual(detalleData.venta.detalles[0].cantidad, 2);
+
+        const respuestaModificacion = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "Compra mensual" })
+        });
+        assert.strictEqual(respuestaModificacion.status, 200);
+        assert.strictEqual((await respuestaModificacion.json()).venta.nombrePersonalizado, "Compra mensual");
+
+        const ajena = await fetch(`${baseUrl}/ventas/${ventaClienteB.id}/nombre`, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${tokenClienteA}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ nombrePersonalizado: "No autorizada" })
+        });
+        assert.strictEqual(ajena.status, 403);
+        await ajena.arrayBuffer();
+        const compraAjena = await prisma.venta.findUnique({
+            where: { id: ventaClienteB.id },
+            select: { nombrePersonalizado: true }
+        });
+        assert.strictEqual(compraAjena.nombrePersonalizado, null);
+    });
+
+    test("7. El cliente descarga un PDF con los datos históricos de su compra", async () => {
+        const productoAdicional = await prisma.producto.create({
+            data: {
+                nombre: "Producto adicional comprobante",
+                precio: 7000,
+                stock: 10,
+                categoriaId: categoriaTest.id,
+                tipoProductoId: tipoProductoTest.id,
+                activo: true
+            }
+        });
+        const ventaPdf = await prisma.venta.create({
+            data: {
+                usuarioId: clienteA.id,
+                clienteNombre: clienteA.nombre,
+                nombrePersonalizado: "Compra para mi casa",
+                codigoComprobante: `V-TEST-PDF-${Date.now()}`,
+                fechaRetiro: new Date("2030-05-17T00:00:00.000Z"),
+                horarioRetiroInicio: "08:00",
+                horarioRetiroFin: "09:00",
+                estado: "COBRADA",
+                total: 2726.75,
+                detalles: {
+                    create: [
+                        { productoId: productoTest.id, cantidad: 2, precioUnitario: 1250.50, subtotal: 2501.00 },
+                        { productoId: productoAdicional.id, cantidad: 3, precioUnitario: 75.25, subtotal: 225.75 }
+                    ]
+                }
+            }
+        });
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/${ventaPdf.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${tokenClienteA}` }
+            });
+            assert.strictEqual(res.status, 200);
+            assert.match(res.headers.get("content-type"), /application\/pdf/);
+            assert.match(res.headers.get("content-disposition"), /comprobante-compra-V-TEST-PDF-/);
+
+            const pdf = Buffer.from(await res.arrayBuffer());
+            const pdfBytes = pdf.toString("latin1");
+            const bloquesTexto = extraerBloquesTextoPdf(pdf);
+            const contenido = extraerTextoPdf(pdf);
+            assert.ok(pdfBytes.startsWith("%PDF-"));
+            assert.ok(pdfBytes.endsWith("%%EOF\n"));
+            assert.ok(contenido.includes(productoTest.nombre));
+            assert.ok(contenido.includes("Producto adicional comprobante"));
+            assert.ok(contenido.includes("Compra para mi casa"));
+            assert.ok(contenido.includes("Fecha de retiro"));
+            assert.ok(contenido.includes("17/05/2030"));
+            assert.ok(contenido.includes("08:00 a 09:00"));
+            assert.ok(!contenido.includes("Fecha de retironull"));
+            assert.ok(bloquesTexto.includes("2"));
+            assert.ok(bloquesTexto.includes("3"));
+            assert.ok(contenido.includes("2.501,00"));
+            assert.ok(contenido.includes("75,25"));
+            assert.ok(contenido.includes("2.726,75"));
+            assert.match(contenido, /Descuentos:.*0,00/);
+            assert.ok(contenido.includes("COBRADA"));
+        } finally {
+            await prisma.detalleVenta.deleteMany({ where: { ventaId: ventaPdf.id } });
+            await prisma.venta.delete({ where: { id: ventaPdf.id } });
+            await prisma.producto.delete({ where: { id: productoAdicional.id } });
+        }
+    });
+
+    test("7a. La compra anónima de autogestión descarga el PDF usando el código público sin sesión", async () => {
+        const codigoComprobante = `V-TEST-ANONIMO-${Date.now()}`;
+        const ventaAnonima = await prisma.venta.create({
+            data: {
+                codigoComprobante,
+                clienteNombre: "Consumidor final",
+                estado: "COBRADA",
+                total: 1250.50,
+                detalles: {
+                    create: [{
+                        productoId: productoTest.id,
+                        cantidad: 1,
+                        precioUnitario: 1250.50,
+                        subtotal: 1250.50
+                    }]
+                }
+            }
+        });
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/comprobante/${encodeURIComponent(codigoComprobante)}/pdf`);
+            assert.strictEqual(res.status, 200);
+            assert.match(res.headers.get("content-type"), /application\/pdf/);
+            assert.match(res.headers.get("content-disposition"), /comprobante-compra-V-TEST-ANONIMO-/);
+            assert.strictEqual(res.headers.get("cache-control"), "no-store");
+
+            const pdf = Buffer.from(await res.arrayBuffer());
+            assert.strictEqual(pdf.subarray(0, 5).toString(), "%PDF-");
+            assert.ok(extraerTextoPdf(pdf).includes(codigoComprobante));
+            assert.ok(extraerTextoPdf(pdf).includes(productoTest.nombre));
+        } finally {
+            await prisma.detalleVenta.deleteMany({ where: { ventaId: ventaAnonima.id } });
+            await prisma.venta.delete({ where: { id: ventaAnonima.id } });
+        }
+    });
+
+    test("8. Rechaza descargas sin sesión y de compras de otras personas", async () => {
+        const sinSesion = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}/comprobante.pdf`);
+        assert.strictEqual(sinSesion.status, 401);
+
+        const res = await fetch(`${baseUrl}/ventas/${ventaClienteB.id}/comprobante.pdf`, {
+            headers: { Authorization: `Bearer ${tokenClienteA}` }
+        });
+        assert.strictEqual(res.status, 403);
+    });
+
+    test("9. Cajero y administrador pueden descargar comprobantes", async () => {
+        for (const token of [tokenCajero, tokenAdministrador]) {
+            const res = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            assert.strictEqual(res.status, 200);
+            const pdf = Buffer.from(await res.arrayBuffer());
+            assert.strictEqual(pdf.subarray(0, 5).toString(), "%PDF-");
+        }
+    });
+
+    test("10. Un comprobante sin productos o con datos opcionales ausentes genera un PDF válido", async () => {
+        const ventaSinDetalles = await prisma.venta.create({
+            data: {
+                codigoComprobante: `V-TEST-VACIA-${Date.now()}`,
+                total: 0,
+                usuarioId: clienteA.id,
+                estado: "PENDIENTE"
+            }
+        });
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/${ventaSinDetalles.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${tokenClienteA}` }
+            });
+            assert.strictEqual(res.status, 200);
+            const pdf = Buffer.from(await res.arrayBuffer());
+            const contenido = extraerTextoPdf(pdf);
+            assert.strictEqual(pdf.subarray(0, 5).toString(), "%PDF-");
+            assert.ok(contenido.replace(/\s+/g, "").includes("Nohayproductosregistradosparaestacompra."));
+            assert.ok(contenido.includes("Consumidor final"));
+        } finally {
+            await prisma.venta.delete({ where: { id: ventaSinDetalles.id } });
+        }
+    });
+
+    test("11. Informa un error del generador sin devolver un PDF inválido", async () => {
+        const generadorOriginal = comprobantePdfService.generarComprobantePdf;
+        comprobantePdfService.generarComprobantePdf = async function () {
+            throw new Error("Fallo de prueba en la generación");
+        };
+
+        try {
+            const res = await fetch(`${baseUrl}/ventas/${ventaClienteA.id}/comprobante.pdf`, {
+                headers: { Authorization: `Bearer ${tokenClienteA}` }
+            });
+            assert.strictEqual(res.status, 500);
+            assert.match((await res.json()).mensaje, /error en el servidor/i);
+        } finally {
+            comprobantePdfService.generarComprobantePdf = generadorOriginal;
+        }
+    });
+
+    test("12. Cliente sin compras recibe lista vacía", async () => {
         const rolCliente = await prisma.rol.findUnique({ where: { nombre: "Cliente" } });
         const uniqueSuffix2 = (Date.now() + 1).toString().slice(-6);
         const clienteSinCompras = await prisma.usuario.create({

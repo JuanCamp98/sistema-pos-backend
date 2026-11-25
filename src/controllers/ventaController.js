@@ -1,6 +1,13 @@
 const ventaService = require("../services/ventaService");
+const comprobantePdfService = require("../services/comprobantePdfService");
 const { listarVentasQuerySchema } = require("../schemas/ventaSchema");
 const ErrorPersonalizado = require("../utils/errorPersonalizado");
+
+function verificarAccesoVenta(usuario, venta) {
+    if (usuario?.rol === "Cliente" && venta.usuarioId !== usuario.id) {
+        throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
+    }
+}
 
 async function registrar(req, res, next) {
     try {
@@ -63,6 +70,16 @@ async function cancelar(req, res, next) {
     } catch (error) { next(error); }
 }
 
+async function cancelarCliente(req, res, next) {
+    try {
+        const ventaCancelada = await ventaService.cancelarVentaCliente(req.params.id, req.usuario.id);
+        res.status(200).json({
+            mensaje: "Compra cancelada correctamente",
+            venta: ventaCancelada
+        });
+    } catch (error) { next(error); }
+}
+
 async function preparar(req, res, next) {
     try {
         const venta = await ventaService.marcarVentaEnPreparacion(req.params.id);
@@ -102,11 +119,51 @@ async function listar(req, res, next) {
 async function obtenerPorId(req, res, next) {
     try {
         const venta = await ventaService.obtenerVentaPorId(req.params.id);
-        if (req.usuario && req.usuario.rol === "Cliente" && venta.usuarioId !== req.usuario.id) {
-            throw new ErrorPersonalizado("No tenes permisos para realizar esta accion", 403);
-        }
+        verificarAccesoVenta(req.usuario, venta);
         res.status(200).json({ venta: venta });
     } catch (error) { next(error); }
+}
+
+async function renombrar(req, res, next) {
+    try {
+        const venta = await ventaService.renombrarVenta(
+            req.params.id,
+            req.usuario.id,
+            req.body.nombrePersonalizado
+        );
+        res.status(200).json({
+            mensaje: "Nombre de la compra actualizado correctamente",
+            venta
+        });
+    } catch (error) { next(error); }
+}
+
+async function descargarComprobantePdf(req, res, next) {
+    try {
+        const venta = await ventaService.obtenerVentaPorId(req.params.id);
+        verificarAccesoVenta(req.usuario, venta);
+        await enviarComprobantePdf(res, venta, "private, no-store");
+    } catch (error) { next(error); }
+}
+
+async function descargarComprobantePdfPorCodigo(req, res, next) {
+    try {
+        const venta = await ventaService.obtenerVentaPorCodigoComprobante(req.params.codigo);
+        await enviarComprobantePdf(res, venta, "no-store");
+    } catch (error) { next(error); }
+}
+
+async function enviarComprobantePdf(res, venta, cacheControl) {
+    const pdf = await comprobantePdfService.generarComprobantePdf(venta);
+    const codigoSeguro = String(venta.codigoComprobante || "compra").replace(/[^a-zA-Z0-9_-]/g, "-");
+
+    res.set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="comprobante-compra-${codigoSeguro}.pdf"`,
+        "Content-Length": pdf.length,
+        "Cache-Control": cacheControl
+    });
+    res.status(200).send(pdf);
 }
 
 async function buscarPorComprobante(req, res, next) {
@@ -125,7 +182,7 @@ async function consultarEstadoQr(req, res, next) {
 
 async function webhookMercadoPago(req, res, next) {
     try {
-        await ventaService.procesarNotificacionQr(req.body);
+        await ventaService.procesarNotificacionQr(req.mercadoPagoOrderId);
         res.sendStatus(200);
     } catch (error) { next(error); }
 }
@@ -135,11 +192,15 @@ module.exports = {
     registrarDirecta,
     cobrar,
     cancelar,
+    cancelarCliente,
     preparar,
     listaParaRetirar,
     retirar,
     listar,
     obtenerPorId,
+    renombrar,
+    descargarComprobantePdf,
+    descargarComprobantePdfPorCodigo,
     buscarPorComprobante,
     consultarEstadoQr,
     webhookMercadoPago

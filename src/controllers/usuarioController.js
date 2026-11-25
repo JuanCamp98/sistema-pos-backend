@@ -1,5 +1,6 @@
 // Controlador de usuarios, conecta las rutas HTTP con el servicio
 const usuarioService = require("../services/usuarioService");
+const { consultarClientePorDniSchema } = require("../schemas/usuarioSchema");
 
 async function registrar(req, res, next) {
     try {
@@ -41,4 +42,86 @@ async function iniciarSesion(req, res, next) {
     }
 }
 
-module.exports = { registrar, iniciarSesion };
+async function solicitarRecuperacion(req, res, next) {
+    try {
+        await usuarioService.solicitarRecuperacionContrasena(req.body.email);
+        res.status(200).json({
+            mensaje: "Si el correo está asociado a una cuenta, recibirás instrucciones para restablecer tu contraseña."
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function restablecerContrasena(req, res, next) {
+    try {
+        await usuarioService.restablecerContrasena(req.body.token, req.body.contrasena);
+        res.status(200).json({ mensaje: "La contraseña se restableció correctamente." });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function obtenerPerfil(req, res, next) {
+    try {
+        const usuario = await usuarioService.obtenerPerfilUsuario(req.usuario.id);
+        res.status(200).json({ usuario });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function actualizarPerfil(req, res, next) {
+    try {
+        // El ID siempre sale del token verificado, nunca del cuerpo del request.
+        const usuario = await usuarioService.actualizarPerfilUsuario(
+            req.usuario.id,
+            req.body
+        );
+        res.status(200).json({
+            mensaje: "Perfil actualizado correctamente",
+            usuario
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function cambiarContrasena(req, res, next) {
+    try {
+        await usuarioService.cambiarContrasenaUsuario(req.usuario.id, req.body);
+        res.status(200).json({
+            mensaje: "Contraseña actualizada correctamente"
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+async function obtenerClientePorDni(req, res, next) {
+    try {
+        const resultado = consultarClientePorDniSchema.safeParse({ dni: req.params.dni });
+        if (!resultado.success) {
+            const errores = resultado.error.issues.map(function (issue) {
+                return issue.path.join(".") + ": " + issue.message;
+            });
+            return res.status(400).json({ mensaje: "Datos invalidos", errores });
+        }
+
+        const cliente = await usuarioService.obtenerClientePorDni(resultado.data.dni);
+        res.status(200).json({ cliente });
+    } catch (error) {
+        next(error);
+    }
+}
+
+module.exports = {
+    registrar,
+    iniciarSesion,
+    solicitarRecuperacion,
+    restablecerContrasena,
+    obtenerPerfil,
+    actualizarPerfil,
+    cambiarContrasena,
+    obtenerClientePorDni
+};

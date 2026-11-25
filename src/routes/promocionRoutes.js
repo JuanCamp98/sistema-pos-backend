@@ -9,6 +9,7 @@ const router = express.Router();
 
 // Publico: el catalogo de clientes solo necesita promociones ya filtradas por vigencia.
 router.get("/vigentes", promocionController.listarVigentes);
+router.get("/precio-minimo", promocionController.obtenerConfiguracionPublica);
 router.get("/", verificarToken, verificarRol(["Administrador"]), promocionController.listar);
 router.get("/:id", verificarToken, verificarRol(["Administrador"]), promocionController.obtenerPorId);
 router.post("/", verificarToken, verificarRol(["Administrador"]), validar(crearPromocionSchema), promocionController.crear);

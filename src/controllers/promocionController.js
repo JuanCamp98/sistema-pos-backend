@@ -24,4 +24,8 @@ async function listarVigentes(req, res, next) {
     try { res.status(200).json({ promociones: await promocionService.listarPromocionesVigentes() }); } catch (error) { next(error); }
 }
 
-module.exports = { listar, obtenerPorId, crear, actualizar, eliminar, listarVigentes };
+async function obtenerConfiguracionPublica(req, res, next) {
+    try { res.status(200).json(promocionService.obtenerConfiguracionPromociones()); } catch (error) { next(error); }
+}
+
+module.exports = { listar, obtenerPorId, crear, actualizar, eliminar, listarVigentes, obtenerConfiguracionPublica };
